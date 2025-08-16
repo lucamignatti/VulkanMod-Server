@@ -71,6 +71,7 @@ import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
 import org.lwjgl.vulkan.VkPipelineColorBlendStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineDepthStencilStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineInputAssemblyStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineMultisampleStateCreateInfo;
@@ -383,7 +384,10 @@ public final class OffscreenWorldRenderer {
         double y,
         double z,
         float pitch,
-        float yaw
+        float yaw,
+        int width,
+        int height,
+        int renderDistance
     ) {
         if (!initialized.get() || !available.get()) {
             return null;
@@ -399,9 +403,68 @@ public final class OffscreenWorldRenderer {
                 world = ms.overworld();
             }
         } catch (Throwable ignored) {}
-        // If world unavailable, render a blank (cleared) frame and let caller fallback based on policy
+        // ServerLevel unavailable (server not wired yet): we'll return a cleared frame
+        if (world == null) {
+            System.out.println(
+                "OffscreenWorldRenderer: no ServerLevel (ServerRenderer.server == null) — returning cleared frame"
+            );
+        }
+        // Ensure offscreen targets match requested output size (with sane clamps)
+        int reqW = width < 160 ? 160 : Math.min(width, 4096);
+        int reqH = height < 90 ? 90 : Math.min(height, 2160);
+        if (this.width != reqW || this.height != reqH) {
+            // Recreate offscreen targets to the requested size
+            if (framebuffer != 0L) {
+                vkDestroyFramebuffer(device, framebuffer, null);
+                framebuffer = 0L;
+            }
+            if (colorImageView != 0L) {
+                vkDestroyImageView(device, colorImageView, null);
+                colorImageView = 0L;
+            }
+            if (colorImage != 0L) {
+                vkDestroyImage(device, colorImage, null);
+                colorImage = 0L;
+            }
+            if (colorImageMemory != 0L) {
+                vkFreeMemory(device, colorImageMemory, null);
+                colorImageMemory = 0L;
+            }
+            if (depthImageView != 0L) {
+                vkDestroyImageView(device, depthImageView, null);
+                depthImageView = 0L;
+            }
+            if (depthImage != 0L) {
+                vkDestroyImage(device, depthImage, null);
+                depthImage = 0L;
+            }
+            if (depthImageMemory != 0L) {
+                vkFreeMemory(device, depthImageMemory, null);
+                depthImageMemory = 0L;
+            }
+            boolean targetsOk = createOffscreenTargets(reqW, reqH);
+            if (!targetsOk) {
+                System.err.println(
+                    "OffscreenWorldRenderer: createOffscreenTargets failed for " +
+                    reqW +
+                    "x" +
+                    reqH
+                );
+            }
+            // Recreate readback image (linear) to match new size
+            if (readbackImage != 0L) {
+                vkDestroyImage(device, readbackImage, null);
+                readbackImage = 0L;
+            }
+            if (readbackImageMemory != 0L) {
+                vkFreeMemory(device, readbackImageMemory, null);
+                readbackImageMemory = 0L;
+            }
+            createReadbackImage();
+        }
+
         RegionMesh regionMesh = null;
-        int regionSizeChunks = 8;
+        int regionSizeChunks = Math.max(2, Math.min(renderDistance, 16));
         try {
             if (world != null) {
                 int cs = 16;
@@ -415,54 +478,74 @@ public final class OffscreenWorldRenderer {
                 int minY = world.getMinBuildHeight();
                 int maxY = world.getMaxBuildHeight();
 
-                // Preflight: ensure all chunks in region are loaded; avoid off-thread chunk loads
-                net.minecraft.server.level.ServerChunkCache cm =
-                    world.getChunkSource();
-                boolean loaded = true;
-                for (
-                    int cz = regionChunkZ;
-                    cz < regionChunkZ + regionSizeChunks && loaded;
-                    cz++
-                ) {
-                    for (
-                        int cx = regionChunkX;
-                        cx < regionChunkX + regionSizeChunks;
-                        cx++
-                    ) {
-                        if (!world.hasChunk(cx, cz)) {
-                            loaded = false;
-                            break;
+                // Build snapshot on the server thread; do not force-load chunks (avoid stalling main thread)
+                java.util.concurrent.CompletableFuture<RegionMesh> buildFuture =
+                    new java.util.concurrent.CompletableFuture<>();
+                final net.minecraft.server.level.ServerLevel worldFinal = world;
+                net.minecraft.server.MinecraftServer msLocal =
+                    worldFinal.getServer();
+                msLocal.execute(() -> {
+                    try {
+                        // Force-load chunks synchronously on the server thread
+                        for (
+                            int cz = regionChunkZ;
+                            cz < regionChunkZ + regionSizeChunks;
+                            cz++
+                        ) {
+                            for (
+                                int cx = regionChunkX;
+                                cx < regionChunkX + regionSizeChunks;
+                                cx++
+                            ) {
+                                try {
+                                    worldFinal.getChunk(cx, cz);
+                                } catch (Throwable ignore) {}
+                            }
                         }
-                    }
-                }
-                if (!loaded) {
-                    regionMesh = null;
-                } else {
-                    WorldSnapshotAccessor snap = WorldSnapshotAccessor.capture(
-                        world,
-                        minX,
-                        minY,
-                        minZ,
-                        minX + sideBlocks,
-                        maxY,
-                        minZ + sideBlocks
-                    );
+                        // Proceed to snapshot after ensuring chunks are loaded
+                        WorldSnapshotAccessor snap =
+                            WorldSnapshotAccessor.capture(
+                                worldFinal,
+                                minX,
+                                minY,
+                                minZ,
+                                minX + sideBlocks,
+                                maxY,
+                                minZ + sideBlocks
+                            );
 
-                    MeshBuilder.Config cfg = new MeshBuilder.Config();
-                    cfg.regionSizeChunks = regionSizeChunks;
-                    cfg.minY = minY;
-                    cfg.maxY = maxY;
-                    MeshBuilder builder = new MeshBuilder(cfg);
-                    long version = 1L; // simple version for now
-                    regionMesh = builder.buildRegion(
-                        snap,
-                        regionChunkX,
-                        regionChunkZ,
-                        version
+                        MeshBuilder.Config cfg = new MeshBuilder.Config();
+                        cfg.regionSizeChunks = regionSizeChunks;
+                        cfg.minY = minY;
+                        cfg.maxY = maxY;
+                        MeshBuilder builder = new MeshBuilder(cfg);
+                        long version = 1L; // simple version for now
+                        buildFuture.complete(
+                            builder.buildRegion(
+                                snap,
+                                regionChunkX,
+                                regionChunkZ,
+                                version
+                            )
+                        );
+                    } catch (Throwable t) {
+                        buildFuture.completeExceptionally(t);
+                    }
+                });
+                try {
+                    regionMesh = buildFuture.get();
+                } catch (Throwable t) {
+                    System.err.println(
+                        "OffscreenWorldRenderer: server-thread snapshot/mesh failed: " +
+                        t
                     );
+                    regionMesh = null;
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            System.err.println(
+                "OffscreenWorldRenderer: buildRegion failed: " + t
+            );
             regionMesh = null;
         }
 
@@ -537,8 +620,22 @@ public final class OffscreenWorldRenderer {
                         idxBytes
                     );
 
-                    if (!uploadBuffer(vbo.buffer, vSrc)) return null;
-                    if (!uploadBuffer(ibo.buffer, iSrc)) return null;
+                    if (!uploadBuffer(vbo.buffer, vSrc)) {
+                        System.err.println(
+                            "OffscreenWorldRenderer: uploadBuffer for vertex buffer failed (bytes=" +
+                            vtxBytes +
+                            ")"
+                        );
+                        return null;
+                    }
+                    if (!uploadBuffer(ibo.buffer, iSrc)) {
+                        System.err.println(
+                            "OffscreenWorldRenderer: uploadBuffer for index buffer failed (bytes=" +
+                            idxBytes +
+                            ")"
+                        );
+                        return null;
+                    }
 
                     RegionCacheEntry e = new RegionCacheEntry();
                     e.vertexBuffer = vbo.buffer;
@@ -555,12 +652,18 @@ public final class OffscreenWorldRenderer {
                     cacheEntry = existing;
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            System.err.println(
+                "OffscreenWorldRenderer: region GPU upload/cache failed: " + t
+            );
             cacheEntry = null;
         }
 
+        // If we have no uploaded region buffers, we will render a cleared frame (no draw)
         if (cacheEntry == null || cacheEntry.indexCount <= 0) {
-            return null;
+            System.out.println(
+                "OffscreenWorldRenderer: no region mesh/buffers available — returning cleared frame (no draw)"
+            );
         }
         try (MemoryStack stack = stackPush()) {
             // Allocate a command buffer
@@ -573,6 +676,10 @@ public final class OffscreenWorldRenderer {
             PointerBuffer pCB = stack.mallocPointer(1);
             int err = vkAllocateCommandBuffers(device, cbAlloc, pCB);
             if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkAllocateCommandBuffers failed: " +
+                    toVk(err)
+                );
                 return null;
             }
             org.lwjgl.vulkan.VkCommandBuffer commandBuffer =
@@ -585,6 +692,10 @@ public final class OffscreenWorldRenderer {
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
             err = vkBeginCommandBuffer(commandBuffer, beginInfo);
             if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkBeginCommandBuffer failed: " +
+                    toVk(err)
+                );
                 return null;
             }
 
@@ -613,9 +724,9 @@ public final class OffscreenWorldRenderer {
             clearValues
                 .get(0)
                 .color()
-                .float32(0, 0.1f)
-                .float32(1, 0.1f)
-                .float32(2, 0.1f)
+                .float32(0, 0.2f)
+                .float32(1, 0.3f)
+                .float32(2, 0.6f)
                 .float32(3, 1.0f);
             clearValues.get(1).depthStencil().depth(1.0f).stencil(0);
 
@@ -701,6 +812,10 @@ public final class OffscreenWorldRenderer {
                 );
 
                 // Draw
+                System.out.println(
+                    "OffscreenWorldRenderer: drawIndexed count=" +
+                    cacheEntry.indexCount
+                );
                 vkCmdDrawIndexed(
                     commandBuffer,
                     cacheEntry.indexCount,
@@ -771,6 +886,10 @@ public final class OffscreenWorldRenderer {
             // End and submit
             err = vkEndCommandBuffer(commandBuffer);
             if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkEndCommandBuffer failed: " +
+                    toVk(err)
+                );
                 return null;
             }
 
@@ -784,12 +903,18 @@ public final class OffscreenWorldRenderer {
             );
             err = vkCreateFence(device, fci, null, pFence);
             if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkCreateFence failed: " + toVk(err)
+                );
                 return null;
             }
             long fence = pFence.get(0);
 
             err = vkQueueSubmit(graphicsQueue, submitInfo, fence);
             if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkQueueSubmit failed: " + toVk(err)
+                );
                 vkDestroyFence(device, fence, null);
                 return null;
             }
@@ -798,6 +923,11 @@ public final class OffscreenWorldRenderer {
 
             // Read back pixels
             BufferedImage img = readBackToImage();
+            if (img == null) {
+                System.err.println(
+                    "OffscreenWorldRenderer: readBackToImage returned null"
+                );
+            }
             // Cleanup per-frame
             vkDestroyFence(device, fence, null);
 
@@ -1326,6 +1456,16 @@ public final class OffscreenWorldRenderer {
                     )
                     .pAttachments(cbAttach);
 
+            // Enable dynamic viewport and scissor; actual values set with vkCmdSetViewport/Scissor
+            java.nio.IntBuffer dynamics = stack.ints(
+                VK_DYNAMIC_STATE_VIEWPORT,
+                VK_DYNAMIC_STATE_SCISSOR
+            );
+            VkPipelineDynamicStateCreateInfo dyn =
+                VkPipelineDynamicStateCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
+                    .pDynamicStates(dynamics);
+
             VkGraphicsPipelineCreateInfo.Buffer gpc =
                 VkGraphicsPipelineCreateInfo.calloc(1, stack);
             gpc
@@ -1339,6 +1479,7 @@ public final class OffscreenWorldRenderer {
                 .pMultisampleState(ms)
                 .pDepthStencilState(ds)
                 .pColorBlendState(cb)
+                .pDynamicState(dyn)
                 .layout(pipelineLayout)
                 .renderPass(renderPass)
                 .subpass(0);
@@ -1954,7 +2095,7 @@ public final class OffscreenWorldRenderer {
         float sy = (float) Math.sin(yaw);
 
         float fx = -sy * cp;
-        float fy = -sp;
+        float fy = sp;
         float fz = cy * cp;
 
         float[] eye = new float[] { (float) x, (float) y, (float) z };

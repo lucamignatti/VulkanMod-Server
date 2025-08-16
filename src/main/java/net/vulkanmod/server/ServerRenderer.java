@@ -28,6 +28,7 @@ public class ServerRenderer {
     // Server reference (generic object to avoid direct Minecraft server dependencies)
     private Object server;
     private boolean initialized = false;
+    private final ServerConfig config = ServerConfig.get();
 
     // Per-bot render contexts
     private final Map<String, BotRenderContext> renderContexts =
@@ -107,6 +108,13 @@ public class ServerRenderer {
             synchronized (ServerRenderer.class) {
                 if (INSTANCE == null) {
                     INSTANCE = new ServerRenderer();
+                    // Auto-initialize headless rendering so callers (e.g. ImageCapture) can use server-side rendering
+                    // without needing to explicitly call initialize(...).
+                    try {
+                        INSTANCE.initialize(null);
+                    } catch (Throwable t) {
+                        LOGGER.warn("ServerRenderer auto-initialize failed", t);
+                    }
                 }
             }
         }
@@ -172,7 +180,11 @@ public class ServerRenderer {
      * Get or create render context for a bot
      */
     public BotRenderContext getOrCreateBotContext(String botId) {
-        return getOrCreateBotContext(botId, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        return getOrCreateBotContext(
+            botId,
+            ServerConfig.get().getCaptureWidth(),
+            ServerConfig.get().getCaptureHeight()
+        );
     }
 
     /**
@@ -337,7 +349,10 @@ public class ServerRenderer {
                     context.y,
                     context.z,
                     context.pitch,
-                    context.yaw
+                    context.yaw,
+                    ServerConfig.get().getCaptureWidth(),
+                    ServerConfig.get().getCaptureHeight(),
+                    ServerConfig.get().getRenderDistance()
                 );
                 if (img != null) {
                     return img;
@@ -555,6 +570,21 @@ public class ServerRenderer {
      */
     public Object getServer() {
         return server;
+    }
+
+    /**
+     * Supply the MinecraftServer reference after startup.
+     * Safe to call at any time; if the renderer wasn't initialized yet, this will initialize it.
+     */
+    public synchronized void setServer(Object server) {
+        this.server = server;
+        LOGGER.info(
+            "ServerRenderer received server instance: {}",
+            server != null
+        );
+        if (!initialized) {
+            initialize(server);
+        }
     }
 
     /**
