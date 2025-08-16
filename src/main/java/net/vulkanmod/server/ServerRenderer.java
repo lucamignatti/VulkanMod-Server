@@ -1,11 +1,13 @@
 package net.vulkanmod.server;
 
 import java.awt.image.BufferedImage;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -139,6 +141,30 @@ public class ServerRenderer {
             if (!initializeHeadlessVulkan()) {
                 LOGGER.error("Failed to initialize headless Vulkan");
                 return false;
+            }
+            // Load server texture atlas from resourcepacks if available
+            try {
+                Path gameDir = FabricLoader.getInstance().getGameDir();
+                boolean atlasOk =
+                    ServerTextureAtlas.getInstance().loadDefaultFromGameDir(
+                        gameDir
+                    );
+                if (atlasOk) {
+                    LOGGER.info(
+                        "ServerTextureAtlas loaded from {}",
+                        gameDir.resolve("resourcepacks")
+                    );
+                } else {
+                    LOGGER.warn(
+                        "ServerTextureAtlas not loaded from {}, using fallback textures",
+                        gameDir.resolve("resourcepacks")
+                    );
+                }
+            } catch (Throwable t) {
+                LOGGER.warn(
+                    "Failed to initialize ServerTextureAtlas; using fallback textures",
+                    t
+                );
             }
 
             initialized = true;

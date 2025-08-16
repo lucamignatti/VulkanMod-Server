@@ -3,6 +3,7 @@ package net.vulkanmod.server.mesh;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import net.vulkanmod.server.ServerTextureAtlas;
 
 /**
  * Server-only mesh builder scaffolding.
@@ -139,6 +140,16 @@ public final class MeshBuilder {
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
+                    // Resolve UV region from the server-side texture atlas for this block key
+                    ServerTextureAtlas.Region __uv =
+                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                            key
+                        );
+                    float u0 = __uv.u0,
+                        v0 = __uv.v0,
+                        u1 = __uv.u1,
+                        v1 = __uv.v1;
+
                     // For each face, check neighbor occupancy
                     // Face order: -Z, +Z, -X, +X, +Y (top), -Y (bottom)
                     // Normal and local quad emission for each.
@@ -161,7 +172,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                     // South (+Z)
@@ -183,7 +198,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                     // West (-X)
@@ -205,7 +224,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                     // East (+X)
@@ -227,7 +250,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                     // Top (+Y)
@@ -249,7 +276,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                     // Bottom (-Y)
@@ -271,7 +302,11 @@ public final class MeshBuilder {
                                 nrm,
                                 baseColor,
                                 faceColor
-                            )
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
                         );
                     }
                 }
@@ -344,15 +379,27 @@ public final class MeshBuilder {
         int bz,
         float[][] corners,
         float[] normal,
-        float[] color
+        float[] color,
+        float u0,
+        float v0,
+        float u1,
+        float v1
     ) {
         final int baseIndex = vtx.countVertices();
 
+        // Precompute scale for atlas region
+        final float du = (u1 - u0);
+        final float dv = (v1 - v0);
+
         // 4 vertices
         for (int i = 0; i < 4; i++) {
-            float x = bx + corners[i][0];
-            float y = by + corners[i][1];
-            float z = bz + corners[i][2];
+            float cx = corners[i][0];
+            float cy = corners[i][1];
+            float cz = corners[i][2];
+
+            float x = bx + cx;
+            float y = by + cy;
+            float z = bz + cz;
 
             // position (3)
             vtx.add(x);
@@ -367,6 +414,41 @@ public final class MeshBuilder {
             vtx.add(color[1]);
             vtx.add(color[2]);
             vtx.add(color[3]);
+
+            // uv (2) — choose mapping based on dominant axis of normal
+            float tu, tv;
+            // Determine face by normal
+            if (normal[2] == -1.0f) {
+                // -Z (north)
+                tu = cx;
+                tv = 1.0f - cy;
+            } else if (normal[2] == 1.0f) {
+                // +Z (south)
+                tu = 1.0f - cx;
+                tv = 1.0f - cy;
+            } else if (normal[0] == -1.0f) {
+                // -X (west)
+                tu = cz;
+                tv = 1.0f - cy;
+            } else if (normal[0] == 1.0f) {
+                // +X (east)
+                tu = 1.0f - cz;
+                tv = 1.0f - cy;
+            } else if (normal[1] == 1.0f) {
+                // +Y (top)
+                tu = cx;
+                tv = cz;
+            } else {
+                // -Y (bottom)
+                tu = cx;
+                tv = 1.0f - cz;
+            }
+
+            // Remap into atlas region
+            float uu = u0 + tu * du;
+            float vv = v0 + tv * dv;
+            vtx.add(uu);
+            vtx.add(vv);
         }
 
         // Two triangles, CW winding:
@@ -534,9 +616,9 @@ public final class MeshBuilder {
         }
 
         int countVertices() {
-            // Vertex stride is 10 floats (pos3 + normal3 + color4)
+            // Vertex stride is 12 floats (pos3 + normal3 + color4 + uv2)
             // Compute based on floats written to avoid separate tracking bugs
-            return size / 10;
+            return size / 12;
         }
 
         // called only by emitFaceQuad (4 vertices at once)

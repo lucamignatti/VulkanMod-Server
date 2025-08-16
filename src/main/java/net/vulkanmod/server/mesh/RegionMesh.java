@@ -16,19 +16,28 @@ import java.nio.IntBuffer;
  * - Cache and reuse across frames until the underlying world data changes
  *
  * Buffer layout (interleaved):
- * - Each vertex is packed as: [px, py, pz, nx, ny, nz, r, g, b, a]
- *   where p* are position floats, n* are normal floats,
- *   and r,g,b,a are color components stored as floats in [0,1].
+ * - Each vertex is packed as one of:
+ *   - Without UVs: [px, py, pz, nx, ny, nz, r, g, b, a]
+ *   - With UVs:    [px, py, pz, nx, ny, nz, r, g, b, a, u, v]
+ *   where p* are position floats, n* are normal floats, r,g,b,a are color components stored as floats in [0,1],
+ *   and u,v are texture coordinates in [0,1].
  *
  * The exact layout can evolve, but this interleaved form is sufficient for a basic
  * colored, lit, non-textured pipeline in headless off-screen rendering.
  */
 public final class RegionMesh {
+
     // Interleaved layout constants
     public static final int POS_COMPONENTS = 3;
     public static final int NORMAL_COMPONENTS = 3;
     public static final int COLOR_COMPONENTS = 4;
-    public static final int VERTEX_STRIDE_FLOATS = POS_COMPONENTS + NORMAL_COMPONENTS + COLOR_COMPONENTS;
+    public static final int UV_COMPONENTS = 2;
+    // Backwards-compatible default (no UVs)
+    public static final int VERTEX_STRIDE_FLOATS =
+        POS_COMPONENTS + NORMAL_COMPONENTS + COLOR_COMPONENTS; // 10
+    // Optional stride when UVs are present
+    public static final int VERTEX_STRIDE_FLOATS_UV =
+        POS_COMPONENTS + NORMAL_COMPONENTS + COLOR_COMPONENTS + UV_COMPONENTS; // 12
 
     // Region identity in chunk coordinates (top-left or any agreed convention)
     private final int regionChunkX;
@@ -37,9 +46,9 @@ public final class RegionMesh {
 
     // Mesh data
     private final FloatBuffer interleavedVertices; // direct, native order
-    private final IntBuffer indices;               // direct, native order
-    private final int vertexCount;                 // number of vertices (not floats)
-    private final int indexCount;                  // number of indices
+    private final IntBuffer indices; // direct, native order
+    private final int vertexCount; // number of vertices (not floats)
+    private final int indexCount; // number of indices
 
     // Simple bounding box in world coordinates for culling (optional)
     private final float minX, minY, minZ;
@@ -109,21 +118,35 @@ public final class RegionMesh {
         long version
     ) {
         if (interleavedVertexArray == null) {
-            throw new IllegalArgumentException("interleavedVertexArray is null");
-        }
-        if (interleavedVertexArray.length % VERTEX_STRIDE_FLOATS != 0) {
             throw new IllegalArgumentException(
-                "interleavedVertexArray length must be a multiple of " + VERTEX_STRIDE_FLOATS
+                "interleavedVertexArray is null"
+            );
+        }
+        // Accept either legacy (10 floats/vertex) or UV-enabled (12 floats/vertex) layouts
+        final boolean fitsNoUv =
+            (interleavedVertexArray.length % VERTEX_STRIDE_FLOATS) == 0;
+        final boolean fitsUv =
+            (interleavedVertexArray.length % VERTEX_STRIDE_FLOATS_UV) == 0;
+        if (!(fitsNoUv || fitsUv)) {
+            throw new IllegalArgumentException(
+                "interleavedVertexArray length must be a multiple of " +
+                VERTEX_STRIDE_FLOATS +
+                " (no UV) or " +
+                VERTEX_STRIDE_FLOATS_UV +
+                " (with UV)"
             );
         }
         if (indexArray == null) {
             throw new IllegalArgumentException("indexArray is null");
         }
         if (aabbMinMax == null || aabbMinMax.length != 6) {
-            throw new IllegalArgumentException("aabbMinMax must be length 6 [minX,minY,minZ,maxX,maxY,maxZ]");
+            throw new IllegalArgumentException(
+                "aabbMinMax must be length 6 [minX,minY,minZ,maxX,maxY,maxZ]"
+            );
         }
 
-        int vertexCount = interleavedVertexArray.length / VERTEX_STRIDE_FLOATS;
+        int stride = fitsUv ? VERTEX_STRIDE_FLOATS_UV : VERTEX_STRIDE_FLOATS;
+        int vertexCount = interleavedVertexArray.length / stride;
         int indexCount = indexArray.length;
 
         // Allocate direct buffers in native order
@@ -174,10 +197,14 @@ public final class RegionMesh {
         long version
     ) {
         if (interleavedVertices == null || !interleavedVertices.isDirect()) {
-            throw new IllegalArgumentException("interleavedVertices must be a non-null direct FloatBuffer");
+            throw new IllegalArgumentException(
+                "interleavedVertices must be a non-null direct FloatBuffer"
+            );
         }
         if (indices == null || !indices.isDirect()) {
-            throw new IllegalArgumentException("indices must be a non-null direct IntBuffer");
+            throw new IllegalArgumentException(
+                "indices must be a non-null direct IntBuffer"
+            );
         }
         long ts = System.nanoTime();
         return new RegionMesh(
@@ -281,26 +308,50 @@ public final class RegionMesh {
     }
 
     private static FloatBuffer directFloatBuffer(int floats) {
-        ByteBuffer bb = ByteBuffer.allocateDirect(floats * Float.BYTES).order(ByteOrder.nativeOrder());
+        ByteBuffer bb = ByteBuffer.allocateDirect(floats * Float.BYTES).order(
+            ByteOrder.nativeOrder()
+        );
         return bb.asFloatBuffer();
     }
 
     private static IntBuffer directIntBuffer(int ints) {
-        ByteBuffer bb = ByteBuffer.allocateDirect(ints * Integer.BYTES).order(ByteOrder.nativeOrder());
+        ByteBuffer bb = ByteBuffer.allocateDirect(ints * Integer.BYTES).order(
+            ByteOrder.nativeOrder()
+        );
         return bb.asIntBuffer();
     }
 
     @Override
     public String toString() {
-        return "RegionMesh{" +
-            "regionChunkX=" + regionChunkX +
-            ", regionChunkZ=" + regionChunkZ +
-            ", regionSizeChunks=" + regionSizeChunks +
-            ", vertexCount=" + vertexCount +
-            ", indexCount=" + indexCount +
-            ", aabb=(" + minX + "," + minY + "," + minZ + " -> " + maxX + "," + maxY + "," + maxZ + ")" +
-            ", version=" + version +
-            '}';
+        return (
+            "RegionMesh{" +
+            "regionChunkX=" +
+            regionChunkX +
+            ", regionChunkZ=" +
+            regionChunkZ +
+            ", regionSizeChunks=" +
+            regionSizeChunks +
+            ", vertexCount=" +
+            vertexCount +
+            ", indexCount=" +
+            indexCount +
+            ", aabb=(" +
+            minX +
+            "," +
+            minY +
+            "," +
+            minZ +
+            " -> " +
+            maxX +
+            "," +
+            maxY +
+            "," +
+            maxZ +
+            ")" +
+            ", version=" +
+            version +
+            '}'
+        );
     }
 
     @Override
@@ -316,9 +367,11 @@ public final class RegionMesh {
     @Override
     public boolean equals(Object obj) {
         if (!(obj instanceof RegionMesh other)) return false;
-        return this.regionChunkX == other.regionChunkX
-            && this.regionChunkZ == other.regionChunkZ
-            && this.regionSizeChunks == other.regionSizeChunks
-            && this.version == other.version;
+        return (
+            this.regionChunkX == other.regionChunkX &&
+            this.regionChunkZ == other.regionChunkZ &&
+            this.regionSizeChunks == other.regionSizeChunks &&
+            this.version == other.version
+        );
     }
 }

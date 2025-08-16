@@ -52,6 +52,12 @@ import org.lwjgl.vulkan.VkClearValue;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
 import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
+import org.lwjgl.vulkan.VkDescriptorImageInfo;
+import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
+import org.lwjgl.vulkan.VkDescriptorPoolSize;
+import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkDeviceCreateInfo;
 import org.lwjgl.vulkan.VkDeviceQueueCreateInfo;
 import org.lwjgl.vulkan.VkExtent2D;
@@ -84,6 +90,7 @@ import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkRect2D;
 import org.lwjgl.vulkan.VkRenderPassBeginInfo;
 import org.lwjgl.vulkan.VkRenderPassCreateInfo;
+import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
 import org.lwjgl.vulkan.VkSubpassDescription;
@@ -91,6 +98,7 @@ import org.lwjgl.vulkan.VkSubresourceLayout;
 import org.lwjgl.vulkan.VkVertexInputAttributeDescription;
 import org.lwjgl.vulkan.VkVertexInputBindingDescription;
 import org.lwjgl.vulkan.VkViewport;
+import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /**
  * OffscreenWorldRenderer implements a true server-only, headless Vulkan off-screen renderer.
@@ -160,6 +168,22 @@ public final class OffscreenWorldRenderer {
     private long depthImageView;
 
     private long framebuffer;
+
+    // Texture atlas resources
+    private volatile boolean atlasPrepared = false;
+    private int atlasW = 0;
+    private int atlasH = 0;
+    private java.nio.ByteBuffer atlasPixels;
+    private long atlasImage;
+    private long atlasImageMemory;
+    private long atlasImageView;
+    private long atlasSampler;
+
+    // Descriptor set for atlas sampling
+    private long descriptorSetLayout;
+    private long descriptorPool;
+    private long descriptorSet;
+
     private long renderPass;
 
     // Pipeline
@@ -465,8 +489,535 @@ public final class OffscreenWorldRenderer {
                 readbackImageMemory = 0L;
             }
             createReadbackImage();
+            // Lazy-load texture atlas pixels and create GPU resources (image + sampler + descriptor)
+            if (!this.atlasPrepared) {
+                try {
+                    net.vulkanmod.server.ServerTextureAtlas at =
+                        net.vulkanmod.server.ServerTextureAtlas.getInstance();
+                    java.nio.ByteBuffer px = at.getAtlasPixelsRGBA();
+                    if (px != null && px.remaining() > 0) {
+                        this.atlasPixels = px;
+                        this.atlasW = at.getAtlasWidth();
+                        this.atlasH = at.getAtlasHeight();
+                        this.atlasPrepared = true;
+                    }
+                } catch (Throwable t) {
+                    System.err.println(
+                        "OffscreenWorldRenderer: atlas preload failed: " + t
+                    );
+                    this.atlasPrepared = false;
+                }
+            }
+            if (
+                this.atlasPrepared &&
+                this.atlasImage == 0L &&
+                this.atlasPixels != null
+            ) {
+                try (
+                    org.lwjgl.system.MemoryStack st =
+                        org.lwjgl.system.MemoryStack.stackPush()
+                ) {
+                    // Create atlas image (optimal, sampled, transfer dst)
+                    boolean okImg = createImage(
+                        atlasW,
+                        atlasH,
+                        COLOR_FORMAT,
+                        VK_IMAGE_TILING_OPTIMAL,
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                        (img, mem) -> {
+                            atlasImage = img;
+                            atlasImageMemory = mem;
+                        }
+                    );
+                    if (!okImg) {
+                        System.err.println(
+                            "OffscreenWorldRenderer: failed to create atlas image"
+                        );
+                    } else {
+                        // Image view
+                        LongBuffer pView = st.mallocLong(1);
+                        VkImageViewCreateInfo ivci =
+                            VkImageViewCreateInfo.calloc(st)
+                                .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                                .image(atlasImage)
+                                .viewType(VK_IMAGE_VIEW_TYPE_2D)
+                                .format(COLOR_FORMAT);
+                        VkImageSubresourceRange sub =
+                            VkImageSubresourceRange.calloc(st)
+                                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                                .baseMipLevel(0)
+                                .levelCount(1)
+                                .baseArrayLayer(0)
+                                .layerCount(1);
+                        ivci.subresourceRange(sub);
+                        int errIv = vkCreateImageView(
+                            device,
+                            ivci,
+                            null,
+                            pView
+                        );
+                        if (errIv != VK_SUCCESS) {
+                            System.err.println(
+                                "OffscreenWorldRenderer: vkCreateImageView (atlas) failed: " +
+                                toVk(errIv)
+                            );
+                        } else {
+                            atlasImageView = pView.get(0);
+                            // Sampler
+                            LongBuffer pSampler = st.mallocLong(1);
+                            VkSamplerCreateInfo sci =
+                                VkSamplerCreateInfo.calloc(st)
+                                    .sType(
+                                        VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+                                    )
+                                    .magFilter(VK_FILTER_NEAREST)
+                                    .minFilter(VK_FILTER_NEAREST)
+                                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                                    .addressModeU(
+                                        VK_SAMPLER_ADDRESS_MODE_REPEAT
+                                    )
+                                    .addressModeV(
+                                        VK_SAMPLER_ADDRESS_MODE_REPEAT
+                                    )
+                                    .addressModeW(
+                                        VK_SAMPLER_ADDRESS_MODE_REPEAT
+                                    )
+                                    .maxLod(0.0f)
+                                    .minLod(0.0f)
+                                    .mipLodBias(0.0f)
+                                    .unnormalizedCoordinates(false);
+                            int errSp = vkCreateSampler(
+                                device,
+                                sci,
+                                null,
+                                pSampler
+                            );
+                            if (errSp != VK_SUCCESS) {
+                                System.err.println(
+                                    "OffscreenWorldRenderer: vkCreateSampler failed: " +
+                                    toVk(errSp)
+                                );
+                            } else {
+                                atlasSampler = pSampler.get(0);
+                                // Upload pixels via staging buffer
+                                BufferAlloc staging = createBuffer(
+                                    atlasPixels.remaining(),
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                                );
+                                if (staging != null) {
+                                    PointerBuffer pData = st.mallocPointer(1);
+                                    vkMapMemory(
+                                        device,
+                                        staging.memory,
+                                        0,
+                                        VK_WHOLE_SIZE,
+                                        0,
+                                        pData
+                                    );
+                                    long ptr = pData.get(0);
+                                    org.lwjgl.system.MemoryUtil.memCopy(
+                                        org.lwjgl.system.MemoryUtil.memAddress(
+                                            atlasPixels
+                                        ),
+                                        ptr,
+                                        atlasPixels.remaining()
+                                    );
+                                    vkUnmapMemory(device, staging.memory);
+                                    // Record copy
+                                    org.lwjgl.vulkan.VkCommandBuffer cmd =
+                                        beginOneTimeCommands();
+                                    transitionImageLayout(
+                                        st,
+                                        cmd,
+                                        atlasImage,
+                                        COLOR_FORMAT,
+                                        VK_IMAGE_LAYOUT_UNDEFINED,
+                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                        VK_IMAGE_ASPECT_COLOR_BIT
+                                    );
+                                    VkBufferImageCopy.Buffer r =
+                                        VkBufferImageCopy.calloc(1, st);
+                                    r
+                                        .get(0)
+                                        .bufferOffset(0)
+                                        .bufferRowLength(0)
+                                        .bufferImageHeight(0)
+                                        .imageSubresource(
+                                            isrl(
+                                                st,
+                                                VK_IMAGE_ASPECT_COLOR_BIT,
+                                                0,
+                                                0
+                                            )
+                                        )
+                                        .imageOffset()
+                                        .set(0, 0, 0);
+                                    r
+                                        .get(0)
+                                        .imageExtent()
+                                        .set(atlasW, atlasH, 1);
+                                    vkCmdCopyBufferToImage(
+                                        cmd,
+                                        staging.buffer,
+                                        atlasImage,
+                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                        r
+                                    );
+                                    transitionImageLayout(
+                                        st,
+                                        cmd,
+                                        atlasImage,
+                                        COLOR_FORMAT,
+                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                        VK_IMAGE_ASPECT_COLOR_BIT
+                                    );
+                                    endOneTimeCommands(cmd);
+                                    // Descriptor pool and set
+                                    LongBuffer pPool = st.mallocLong(1);
+                                    VkDescriptorPoolSize.Buffer poolSizes =
+                                        VkDescriptorPoolSize.calloc(1, st);
+                                    poolSizes
+                                        .get(0)
+                                        .type(
+                                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                        )
+                                        .descriptorCount(1);
+                                    VkDescriptorPoolCreateInfo dpci =
+                                        VkDescriptorPoolCreateInfo.calloc(st)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+                                            )
+                                            .pPoolSizes(poolSizes)
+                                            .maxSets(1);
+                                    int errPool = vkCreateDescriptorPool(
+                                        device,
+                                        dpci,
+                                        null,
+                                        pPool
+                                    );
+                                    if (errPool == VK_SUCCESS) {
+                                        descriptorPool = pPool.get(0);
+                                        LongBuffer pSet = st.mallocLong(1);
+                                        VkDescriptorSetAllocateInfo dsai =
+                                            VkDescriptorSetAllocateInfo.calloc(
+                                                st
+                                            )
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+                                                )
+                                                .descriptorPool(descriptorPool)
+                                                .pSetLayouts(
+                                                    st.longs(
+                                                        descriptorSetLayout
+                                                    )
+                                                );
+                                        int errSet = vkAllocateDescriptorSets(
+                                            device,
+                                            dsai,
+                                            pSet
+                                        );
+                                        if (errSet == VK_SUCCESS) {
+                                            descriptorSet = pSet.get(0);
+                                            VkDescriptorImageInfo.Buffer dii =
+                                                VkDescriptorImageInfo.calloc(
+                                                    1,
+                                                    st
+                                                );
+                                            dii
+                                                .get(0)
+                                                .sampler(atlasSampler)
+                                                .imageView(atlasImageView)
+                                                .imageLayout(
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                );
+                                            VkWriteDescriptorSet.Buffer writes =
+                                                VkWriteDescriptorSet.calloc(
+                                                    1,
+                                                    st
+                                                );
+                                            writes
+                                                .get(0)
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                                                )
+                                                .dstSet(descriptorSet)
+                                                .dstBinding(0)
+                                                .descriptorType(
+                                                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                                )
+                                                .pImageInfo(dii)
+                                                .descriptorCount(1);
+                                            vkUpdateDescriptorSets(
+                                                device,
+                                                writes,
+                                                null
+                                            );
+                                        }
+                                    }
+                                    // allow GC of pixels
+                                    this.atlasPixels = null;
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    System.err.println(
+                        "OffscreenWorldRenderer: atlas resource build failed: " +
+                        t
+                    );
+                }
+            }
         }
 
+        // Ensure atlas resources are prepared every frame (not only on resize)
+        if (!this.atlasPrepared) {
+            try {
+                net.vulkanmod.server.ServerTextureAtlas at =
+                    net.vulkanmod.server.ServerTextureAtlas.getInstance();
+                java.nio.ByteBuffer px = at.getAtlasPixelsRGBA();
+                if (px != null && px.remaining() > 0) {
+                    this.atlasPixels = px;
+                    this.atlasW = at.getAtlasWidth();
+                    this.atlasH = at.getAtlasHeight();
+                    this.atlasPrepared = true;
+                }
+            } catch (Throwable t) {
+                System.err.println(
+                    "OffscreenWorldRenderer: atlas preload failed: " + t
+                );
+                this.atlasPrepared = false;
+            }
+        }
+        if (
+            this.atlasPrepared &&
+            this.atlasImage == 0L &&
+            this.atlasPixels != null
+        ) {
+            try (
+                org.lwjgl.system.MemoryStack st =
+                    org.lwjgl.system.MemoryStack.stackPush()
+            ) {
+                boolean okImg = createImage(
+                    atlasW,
+                    atlasH,
+                    COLOR_FORMAT,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    (img, mem) -> {
+                        atlasImage = img;
+                        atlasImageMemory = mem;
+                    }
+                );
+                if (okImg) {
+                    LongBuffer pView = st.mallocLong(1);
+                    VkImageViewCreateInfo ivci = VkImageViewCreateInfo.calloc(
+                        st
+                    )
+                        .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                        .image(atlasImage)
+                        .viewType(VK_IMAGE_VIEW_TYPE_2D)
+                        .format(COLOR_FORMAT);
+                    VkImageSubresourceRange sub =
+                        VkImageSubresourceRange.calloc(st)
+                            .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .baseMipLevel(0)
+                            .levelCount(1)
+                            .baseArrayLayer(0)
+                            .layerCount(1);
+                    ivci.subresourceRange(sub);
+                    int errIv = vkCreateImageView(device, ivci, null, pView);
+                    if (errIv == VK_SUCCESS) {
+                        atlasImageView = pView.get(0);
+                        LongBuffer pSampler = st.mallocLong(1);
+                        VkSamplerCreateInfo sci = VkSamplerCreateInfo.calloc(st)
+                            .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                            .magFilter(VK_FILTER_NEAREST)
+                            .minFilter(VK_FILTER_NEAREST)
+                            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                            .addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                            .addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                            .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                            .maxLod(0.0f)
+                            .minLod(0.0f)
+                            .mipLodBias(0.0f)
+                            .unnormalizedCoordinates(false);
+                        int errSp = vkCreateSampler(
+                            device,
+                            sci,
+                            null,
+                            pSampler
+                        );
+                        if (errSp == VK_SUCCESS) {
+                            atlasSampler = pSampler.get(0);
+                            BufferAlloc staging = createBuffer(
+                                atlasPixels.remaining(),
+                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                            );
+                            if (staging != null) {
+                                PointerBuffer pData = st.mallocPointer(1);
+                                vkMapMemory(
+                                    device,
+                                    staging.memory,
+                                    0,
+                                    VK_WHOLE_SIZE,
+                                    0,
+                                    pData
+                                );
+                                long ptr = pData.get(0);
+                                org.lwjgl.system.MemoryUtil.memCopy(
+                                    org.lwjgl.system.MemoryUtil.memAddress(
+                                        atlasPixels
+                                    ),
+                                    ptr,
+                                    atlasPixels.remaining()
+                                );
+                                vkUnmapMemory(device, staging.memory);
+                                org.lwjgl.vulkan.VkCommandBuffer cmd =
+                                    beginOneTimeCommands();
+                                transitionImageLayout(
+                                    st,
+                                    cmd,
+                                    atlasImage,
+                                    COLOR_FORMAT,
+                                    VK_IMAGE_LAYOUT_UNDEFINED,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                );
+                                VkBufferImageCopy.Buffer r =
+                                    VkBufferImageCopy.calloc(1, st);
+                                r
+                                    .get(0)
+                                    .bufferOffset(0)
+                                    .bufferRowLength(0)
+                                    .bufferImageHeight(0)
+                                    .imageSubresource(
+                                        isrl(
+                                            st,
+                                            VK_IMAGE_ASPECT_COLOR_BIT,
+                                            0,
+                                            0
+                                        )
+                                    )
+                                    .imageOffset()
+                                    .set(0, 0, 0);
+                                r.get(0).imageExtent().set(atlasW, atlasH, 1);
+                                vkCmdCopyBufferToImage(
+                                    cmd,
+                                    staging.buffer,
+                                    atlasImage,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    r
+                                );
+                                transitionImageLayout(
+                                    st,
+                                    cmd,
+                                    atlasImage,
+                                    COLOR_FORMAT,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                );
+                                endOneTimeCommands(cmd);
+                                if (descriptorPool == 0L) {
+                                    LongBuffer pPool = st.mallocLong(1);
+                                    VkDescriptorPoolSize.Buffer poolSizes =
+                                        VkDescriptorPoolSize.calloc(1, st);
+                                    poolSizes
+                                        .get(0)
+                                        .type(
+                                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                        )
+                                        .descriptorCount(1);
+                                    VkDescriptorPoolCreateInfo dpci =
+                                        VkDescriptorPoolCreateInfo.calloc(st)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+                                            )
+                                            .pPoolSizes(poolSizes)
+                                            .maxSets(1);
+                                    int errPool = vkCreateDescriptorPool(
+                                        device,
+                                        dpci,
+                                        null,
+                                        pPool
+                                    );
+                                    if (errPool == VK_SUCCESS) {
+                                        descriptorPool = pPool.get(0);
+                                    }
+                                }
+                                if (
+                                    descriptorSet == 0L &&
+                                    descriptorPool != 0L &&
+                                    descriptorSetLayout != 0L
+                                ) {
+                                    LongBuffer pSet = st.mallocLong(1);
+                                    VkDescriptorSetAllocateInfo dsai =
+                                        VkDescriptorSetAllocateInfo.calloc(st)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+                                            )
+                                            .descriptorPool(descriptorPool)
+                                            .pSetLayouts(
+                                                st.longs(descriptorSetLayout)
+                                            );
+                                    int errSet = vkAllocateDescriptorSets(
+                                        device,
+                                        dsai,
+                                        pSet
+                                    );
+                                    if (errSet == VK_SUCCESS) {
+                                        descriptorSet = pSet.get(0);
+                                        VkDescriptorImageInfo.Buffer dii =
+                                            VkDescriptorImageInfo.calloc(1, st);
+                                        dii
+                                            .get(0)
+                                            .sampler(atlasSampler)
+                                            .imageView(atlasImageView)
+                                            .imageLayout(
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                            );
+                                        VkWriteDescriptorSet.Buffer writes =
+                                            VkWriteDescriptorSet.calloc(1, st);
+                                        writes
+                                            .get(0)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                                            )
+                                            .dstSet(descriptorSet)
+                                            .dstBinding(0)
+                                            .descriptorType(
+                                                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                            )
+                                            .pImageInfo(dii)
+                                            .descriptorCount(1);
+                                        vkUpdateDescriptorSets(
+                                            device,
+                                            writes,
+                                            null
+                                        );
+                                    }
+                                }
+                                this.atlasPixels = null;
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                System.err.println(
+                    "OffscreenWorldRenderer: atlas resource build failed (late): " +
+                    t
+                );
+            }
+        }
         RegionMesh regionMesh = null;
         int regionSizeChunks = Math.max(2, Math.min(renderDistance, 16));
         try {
@@ -767,15 +1318,19 @@ public final class OffscreenWorldRenderer {
             scissors.get(0).extent().set(width, height);
             vkCmdSetScissor(commandBuffer, 0, scissors);
 
-            // Bind pipeline
-            vkCmdBindPipeline(
-                commandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipeline
-            );
+            // Bind pipeline moved into draw block when descriptor set is ready
 
-            // If we have a mesh/cache entry, bind buffers and draw indexed
-            if (cacheEntry != null && cacheEntry.indexCount > 0) {
+            // If we have a mesh/cache entry and atlas descriptor ready, bind buffers and draw indexed
+            if (
+                cacheEntry != null &&
+                cacheEntry.indexCount > 0 &&
+                descriptorSet != 0L
+            ) {
+                vkCmdBindPipeline(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipeline
+                );
                 // Push MVP
                 float[] mvp = computeMVP(
                     x,
@@ -888,6 +1443,18 @@ public final class OffscreenWorldRenderer {
                     0,
                     pc
                 );
+
+                // Bind atlas descriptor set
+                if (descriptorSet != 0L) {
+                    vkCmdBindDescriptorSets(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout,
+                        0,
+                        stack.longs(descriptorSet),
+                        null
+                    );
+                }
 
                 // Bind vertex buffer
                 LongBuffer pVB = stack.mallocLong(1);
@@ -1330,18 +1897,26 @@ public final class OffscreenWorldRenderer {
                 "layout(location=0) in vec3 inPos;\n" +
                 "layout(location=1) in vec3 inNormal;\n" +
                 "layout(location=2) in vec4 inColor;\n" +
+                "layout(location=3) in vec2 inUV;\n" +
                 "layout(location=0) out vec4 vColor;\n" +
+                "layout(location=1) out vec2 vUV;\n" +
                 "layout(push_constant) uniform Push { mat4 mvp; } pc;\n" +
                 "void main(){\n" +
                 "  gl_Position = pc.mvp * vec4(inPos, 1.0);\n" +
                 "  vColor = inColor;\n" +
+                "  vUV = inUV;\n" +
                 "}\n";
 
             String fragGLSL =
                 "#version 450\n" +
+                "layout(set=0, binding=0) uniform sampler2D uAtlas;\n" +
                 "layout(location=0) in vec4 vColor;\n" +
+                "layout(location=1) in vec2 vUV;\n" +
                 "layout(location=0) out vec4 outColor;\n" +
-                "void main(){ outColor = vColor; }\n";
+                "void main(){\n" +
+                "  vec4 texel = texture(uAtlas, vUV);\n" +
+                "  outColor = vColor * texel;\n" +
+                "}\n";
 
             ByteBuffer vertSpv = compileGLSL(vertGLSL, true);
             if (vertSpv == null) {
@@ -1388,7 +1963,31 @@ public final class OffscreenWorldRenderer {
             }
             fragModule = pShader.get(0);
 
-            // Pipeline layout with push constants for MVP
+            // Descriptor set layout for combined image sampler (atlas)
+            LongBuffer pSetLayout = stack.mallocLong(1);
+            org.lwjgl.vulkan.VkDescriptorSetLayoutBinding.Buffer slb =
+                org.lwjgl.vulkan.VkDescriptorSetLayoutBinding.calloc(1, stack);
+            slb
+                .get(0)
+                .binding(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo dlci =
+                org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
+                    .pBindings(slb);
+            err = vkCreateDescriptorSetLayout(device, dlci, null, pSetLayout);
+            if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkCreateDescriptorSetLayout failed: " +
+                    toVk(err)
+                );
+                return false;
+            }
+            descriptorSetLayout = pSetLayout.get(0);
+
+            // Pipeline layout with set layout + push constants for MVP
             LongBuffer pPL = stack.mallocLong(1);
             VkPushConstantRange.Buffer pcr = VkPushConstantRange.calloc(
                 1,
@@ -1399,10 +1998,12 @@ public final class OffscreenWorldRenderer {
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
                 .offset(0)
                 .size(64);
+
             VkPipelineLayoutCreateInfo plci = VkPipelineLayoutCreateInfo.calloc(
                 stack
             )
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+                .pSetLayouts(stack.longs(descriptorSetLayout))
                 .pPushConstantRanges(pcr);
             err = vkCreatePipelineLayout(device, plci, null, pPL);
             if (err != VK_SUCCESS) {
@@ -1436,11 +2037,11 @@ public final class OffscreenWorldRenderer {
             bindings
                 .get(0)
                 .binding(0)
-                .stride(10 * Float.BYTES)
+                .stride(12 * Float.BYTES)
                 .inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
             VkVertexInputAttributeDescription.Buffer attrs =
-                VkVertexInputAttributeDescription.calloc(3, stack);
+                VkVertexInputAttributeDescription.calloc(4, stack);
             attrs
                 .get(0)
                 .binding(0)
@@ -1459,6 +2060,12 @@ public final class OffscreenWorldRenderer {
                 .location(2)
                 .format(VK_FORMAT_R32G32B32A32_SFLOAT)
                 .offset(6 * Float.BYTES);
+            attrs
+                .get(3)
+                .binding(0)
+                .location(3)
+                .format(VK_FORMAT_R32G32_SFLOAT)
+                .offset(10 * Float.BYTES);
 
             // Fixed-function state
             VkPipelineVertexInputStateCreateInfo vi =
