@@ -111,6 +111,10 @@ import org.lwjgl.vulkan.VkViewport;
  */
 public final class OffscreenWorldRenderer {
 
+    // Diagnostics toggles
+    private static final boolean LOG_CAMERA_BASIS = true; // Log camera basis vectors and computed roll
+    private static final boolean TRANSPOSE_MVP_FOR_SHADER = false; // Toggle to send transposed MVP if shader expects row-major
+
     // Singleton
     private static volatile OffscreenWorldRenderer INSTANCE;
 
@@ -785,8 +789,97 @@ public final class OffscreenWorldRenderer {
                     0.1f,
                     512.0f
                 );
+                // Diagnostic: compute camera basis and roll (expected ~0 deg when pitch != +/-90 and no roll)
+                if (LOG_CAMERA_BASIS) {
+                    float yawR = (float) Math.toRadians(yaw);
+                    float pitchR = (float) Math.toRadians(pitch);
+                    float cp = (float) Math.cos(pitchR);
+                    float sp = (float) Math.sin(pitchR);
+                    float cy = (float) Math.cos(yawR);
+                    float sy = (float) Math.sin(yawR);
+
+                    // Forward (same convention as computeMVP)
+                    float fx = -sy * cp;
+                    float fy = sp;
+                    float fz = cy * cp;
+
+                    // World up
+                    float wux = 0f,
+                        wuy = 1f,
+                        wuz = 0f;
+
+                    // Right = normalize(worldUp x forward)
+                    float rx = wuy * fz - wuz * fy;
+                    float ry = wuz * fx - wux * fz;
+                    float rz = wux * fy - wuy * fx;
+                    float rl = (float) Math.sqrt(rx * rx + ry * ry + rz * rz);
+                    if (rl > 0f) {
+                        rx /= rl;
+                        ry /= rl;
+                        rz /= rl;
+                    }
+
+                    // Up = normalize(forward x right)
+                    float ux = fy * rz - fz * ry;
+                    float uy = fz * rx - fx * rz;
+                    float uz = fx * ry - fy * rx;
+                    float ul = (float) Math.sqrt(ux * ux + uy * uy + uz * uz);
+                    if (ul > 0f) {
+                        ux /= ul;
+                        uy /= ul;
+                        uz /= ul;
+                    }
+
+                    // Project worldUp onto camera plane (orthogonal to forward)
+                    float dotwf = wux * fx + wuy * fy + wuz * fz;
+                    float px = wux - dotwf * fx;
+                    float py = wuy - dotwf * fy;
+                    float pz = wuz - dotwf * fz;
+                    float pl = (float) Math.sqrt(px * px + py * py + pz * pz);
+                    if (pl > 0f) {
+                        px /= pl;
+                        py /= pl;
+                        pz /= pl;
+                    }
+
+                    // Roll is the angle from camera up to projected worldUp around forward
+                    float rollRad = (float) Math.atan2(
+                        rx * px + ry * py + rz * pz,
+                        ux * px + uy * py + uz * pz
+                    );
+                    float rollDeg = rollRad * 57.29578f;
+
+                    System.out.println(
+                        String.format(
+                            java.util.Locale.ROOT,
+                            "OffscreenWorldRenderer: basis f=(%.3f,%.3f,%.3f) r=(%.3f,%.3f,%.3f) u=(%.3f,%.3f,%.3f) roll=%.2fdeg",
+                            fx,
+                            fy,
+                            fz,
+                            rx,
+                            ry,
+                            rz,
+                            ux,
+                            uy,
+                            uz,
+                            rollDeg
+                        )
+                    );
+                }
+
                 ByteBuffer pc = stack.malloc(64);
-                for (int i = 0; i < 16; i++) pc.putFloat(mvp[i]);
+                if (TRANSPOSE_MVP_FOR_SHADER) {
+                    // Transpose MVP before pushing (useful if shader interprets as row-major)
+                    float[] mt = new float[16];
+                    for (int r = 0; r < 4; r++) {
+                        for (int c = 0; c < 4; c++) {
+                            mt[c * 4 + r] = mvp[r * 4 + c];
+                        }
+                    }
+                    for (int i = 0; i < 16; i++) pc.putFloat(mt[i]);
+                } else {
+                    for (int i = 0; i < 16; i++) pc.putFloat(mvp[i]);
+                }
                 pc.flip();
                 vkCmdPushConstants(
                     commandBuffer,
