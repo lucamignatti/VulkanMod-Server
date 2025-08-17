@@ -222,8 +222,137 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                     } else if (foliage.isPresent()) {
                         col = foliage.get();
                     } else {
-                        // No overrides; keep neutral. Water tint handled by texture; revisit in Phase 4 if needed.
-                        col = 0xFFFFFF;
+                        float temp = 0.5f;
+                        try {
+                            java.lang.reflect.Method m =
+                                net.minecraft.world.level.biome
+                                    .Biome.class.getMethod(
+                                    "getTemperature",
+                                    net.minecraft.core.BlockPos.class
+                                );
+                            Object tv = m.invoke(biome, pos);
+                            if (tv instanceof Float f) temp = f;
+                            else temp = ((Number) tv).floatValue();
+                        } catch (Throwable __t0) {
+                            try {
+                                java.lang.reflect.Method m2 =
+                                    net.minecraft.world.level.biome
+                                        .Biome.class.getMethod(
+                                        "getBaseTemperature"
+                                    );
+                                Object tv2 = m2.invoke(biome);
+                                if (tv2 instanceof Float f2) temp = f2;
+                                else temp = ((Number) tv2).floatValue();
+                            } catch (Throwable __t1) {
+                                try {
+                                    java.lang.reflect.Method m3 =
+                                        net.minecraft.world.level.biome
+                                            .Biome.class.getMethod(
+                                            "temperature"
+                                        );
+                                    Object tv3 = m3.invoke(biome);
+                                    if (tv3 instanceof Float f3) temp = f3;
+                                    else temp = ((Number) tv3).floatValue();
+                                } catch (Throwable __t2) {
+                                    temp = 0.5f;
+                                }
+                            }
+                        }
+                        float moist = 0.5f;
+                        try {
+                            java.lang.reflect.Method md =
+                                net.minecraft.world.level.biome
+                                    .Biome.class.getMethod("getDownfall");
+                            Object mv = md.invoke(biome);
+                            if (mv instanceof Float f4) moist = f4;
+                            else moist = ((Number) mv).floatValue();
+                        } catch (Throwable __t3) {
+                            try {
+                                java.lang.reflect.Method md2 =
+                                    net.minecraft.world.level.biome
+                                        .Biome.class.getMethod("downfall");
+                                Object mv2 = md2.invoke(biome);
+                                if (mv2 instanceof Float f5) moist = f5;
+                                else moist = ((Number) mv2).floatValue();
+                            } catch (Throwable __t4) {
+                                moist = 0.5f;
+                            }
+                        }
+                        // Clamp to [0..1]
+                        if (temp < 0f) temp = 0f;
+                        else if (temp > 1f) temp = 1f;
+                        if (moist < 0f) moist = 0f;
+                        else if (moist > 1f) moist = 1f;
+
+                        // Approximate HSV-based grass/foliage tint from temperature and moisture
+                        float hue =
+                            100.0f +
+                            (moist - 0.5f) * 10.0f +
+                            (0.5f - temp) * 20.0f; // degrees, 80..140 ~ green range
+                        if (hue < 80f) hue = 80f;
+                        else if (hue > 140f) hue = 140f;
+                        float sat =
+                            0.6f +
+                            (moist - 0.5f) * 0.2f -
+                            Math.abs(temp - 0.5f) * 0.1f;
+                        if (sat < 0.4f) sat = 0.4f;
+                        else if (sat > 0.9f) sat = 0.9f;
+                        float val =
+                            0.7f + (temp - 0.5f) * 0.2f + (moist - 0.5f) * 0.1f;
+                        if (val < 0.6f) val = 0.6f;
+                        else if (val > 0.95f) val = 0.95f;
+
+                        // HSV -> RGB conversion
+                        float c = val * sat;
+                        float hh = (hue % 360.0f) / 60.0f;
+                        float x = c * (1.0f - Math.abs((hh % 2.0f) - 1.0f));
+                        float r1 = 0f,
+                            g1 = 0f,
+                            b1 = 0f;
+                        int sect = (int) Math.floor(hh);
+                        switch (sect) {
+                            case 0 -> {
+                                r1 = c;
+                                g1 = x;
+                                b1 = 0f;
+                            }
+                            case 1 -> {
+                                r1 = x;
+                                g1 = c;
+                                b1 = 0f;
+                            }
+                            case 2 -> {
+                                r1 = 0f;
+                                g1 = c;
+                                b1 = x;
+                            }
+                            case 3 -> {
+                                r1 = 0f;
+                                g1 = x;
+                                b1 = c;
+                            }
+                            case 4 -> {
+                                r1 = x;
+                                g1 = 0f;
+                                b1 = c;
+                            }
+                            default -> {
+                                r1 = c;
+                                g1 = 0f;
+                                b1 = x;
+                            }
+                        }
+                        float m = val - c;
+                        int rr = (int) ((r1 + m) * 255.0f + 0.5f);
+                        int gg = (int) ((g1 + m) * 255.0f + 0.5f);
+                        int bb = (int) ((b1 + m) * 255.0f + 0.5f);
+                        if (rr < 0) rr = 0;
+                        else if (rr > 255) rr = 255;
+                        if (gg < 0) gg = 0;
+                        else if (gg > 255) gg = 255;
+                        if (bb < 0) bb = 0;
+                        else if (bb > 255) bb = 255;
+                        col = (rr << 16) | (gg << 8) | bb;
                     }
                 } catch (Throwable t) {
                     col = 0xFFFFFF;
