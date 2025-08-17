@@ -406,7 +406,7 @@ public final class ServerTextureAtlas {
         }
 
         // Grid packing parameters
-        final int padding = 1; // 1px padding around each cell to reduce sampling bleed
+        final int padding = 4; // 4px padding around each cell to reduce sampling bleed and improve mip sampling stability
         int cellSize = 0;
         for (LoadedImage li : textures) {
             cellSize = Math.max(
@@ -461,119 +461,120 @@ public final class ServerTextureAtlas {
                     int iw = li.img.getWidth();
                     int ih = li.img.getHeight();
 
-                    // Left/right 1px columns
-                    // Left bleed
-                    g.drawImage(
-                        li.img,
-                        dstX - 1,
-                        dstY,
-                        dstX,
-                        dstY + ih,
-                        0,
-                        0,
-                        1,
-                        ih,
-                        null
-                    );
-                    // Right bleed
-                    g.drawImage(
-                        li.img,
-                        dstX + iw,
-                        dstY,
-                        dstX + iw + 1,
-                        dstY + ih,
-                        iw - 1,
-                        0,
-                        iw,
-                        ih,
-                        null
-                    );
+                    // Bleed edges across the full padding width
+                    for (int p = 1; p <= padding; p++) {
+                        // Left bleed (1px column replicated outward)
+                        g.drawImage(
+                            li.img,
+                            dstX - p,
+                            dstY,
+                            dstX - (p - 1),
+                            dstY + ih,
+                            0,
+                            0,
+                            1,
+                            ih,
+                            null
+                        );
+                        // Right bleed
+                        g.drawImage(
+                            li.img,
+                            dstX + iw + (p - 1),
+                            dstY,
+                            dstX + iw + p,
+                            dstY + ih,
+                            iw - 1,
+                            0,
+                            iw,
+                            ih,
+                            null
+                        );
 
-                    // Top/bottom 1px rows
-                    // Top bleed
-                    g.drawImage(
-                        li.img,
-                        dstX - 1,
-                        dstY - 1,
-                        dstX + iw + 1,
-                        dstY,
-                        0,
-                        0,
-                        iw,
-                        1,
-                        null
-                    );
-                    // Bottom bleed
-                    g.drawImage(
-                        li.img,
-                        dstX - 1,
-                        dstY + ih,
-                        dstX + iw + 1,
-                        dstY + ih + 1,
-                        0,
-                        ih - 1,
-                        iw,
-                        ih,
-                        null
-                    );
+                        // Top bleed (1px row replicated upward across full padded width)
+                        g.drawImage(
+                            li.img,
+                            dstX - padding,
+                            dstY - p,
+                            dstX + iw + padding,
+                            dstY - (p - 1),
+                            0,
+                            0,
+                            iw,
+                            1,
+                            null
+                        );
+                        // Bottom bleed
+                        g.drawImage(
+                            li.img,
+                            dstX - padding,
+                            dstY + ih + (p - 1),
+                            dstX + iw + padding,
+                            dstY + ih + p,
+                            0,
+                            ih - 1,
+                            iw,
+                            ih,
+                            null
+                        );
 
-                    // Corner pixels
-                    // Top-left
-                    g.drawImage(
-                        li.img,
-                        dstX - 1,
-                        dstY - 1,
-                        dstX,
-                        dstY,
-                        0,
-                        0,
-                        1,
-                        1,
-                        null
-                    );
-                    // Top-right
-                    g.drawImage(
-                        li.img,
-                        dstX + iw,
-                        dstY - 1,
-                        dstX + iw + 1,
-                        dstY,
-                        iw - 1,
-                        0,
-                        iw,
-                        1,
-                        null
-                    );
-                    // Bottom-left
-                    g.drawImage(
-                        li.img,
-                        dstX - 1,
-                        dstY + ih,
-                        dstX,
-                        dstY + ih + 1,
-                        0,
-                        ih - 1,
-                        1,
-                        ih,
-                        null
-                    );
-                    // Bottom-right
-                    g.drawImage(
-                        li.img,
-                        dstX + iw,
-                        dstY + ih,
-                        dstX + iw + 1,
-                        dstY + ih + 1,
-                        iw - 1,
-                        ih - 1,
-                        iw,
-                        ih,
-                        null
-                    );
+                        // Corner pixels replicated outward
+                        // Top-left
+                        g.drawImage(
+                            li.img,
+                            dstX - p,
+                            dstY - p,
+                            dstX - (p - 1),
+                            dstY - (p - 1),
+                            0,
+                            0,
+                            1,
+                            1,
+                            null
+                        );
+                        // Top-right
+                        g.drawImage(
+                            li.img,
+                            dstX + iw + (p - 1),
+                            dstY - p,
+                            dstX + iw + p,
+                            dstY - (p - 1),
+                            iw - 1,
+                            0,
+                            iw,
+                            1,
+                            null
+                        );
+                        // Bottom-left
+                        g.drawImage(
+                            li.img,
+                            dstX - p,
+                            dstY + ih + (p - 1),
+                            dstX - (p - 1),
+                            dstY + ih + p,
+                            0,
+                            ih - 1,
+                            1,
+                            ih,
+                            null
+                        );
+                        // Bottom-right
+                        g.drawImage(
+                            li.img,
+                            dstX + iw + (p - 1),
+                            dstY + ih + (p - 1),
+                            dstX + iw + p,
+                            dstY + ih + p,
+                            iw - 1,
+                            ih - 1,
+                            iw,
+                            ih,
+                            null
+                        );
+                    }
                 }
 
-                // Compute normalized UVs for the content area (without padding).
-                // We prefer to include only the inner content (not padding) in the UV range.
+                // Compute normalized UVs for the content area (exclude bleed).
+                // With 4px padding + full edge bleed and CLAMP_TO_EDGE, no expansion is needed.
                 float u0 = (dstX) / (float) atlasW;
                 float v0 = (dstY) / (float) atlasH;
                 float u1 = (dstX + li.img.getWidth()) / (float) atlasW;
@@ -658,7 +659,9 @@ public final class ServerTextureAtlas {
         m.put("stone#side", "minecraft:block/stone");
         m.put("stone#bottom", "minecraft:block/stone");
 
-        // Water: top/bottom still, sides flowing
+        // Water: top/bottom still (no flow), sides flowing.
+        // Note: Only water SIDE faces should use the flowing sprite; TOP/BOTTOM use still.
+        // Mesher should not rotate UVs for non-water faces.
         m.put("water#top", "minecraft:block/water_still");
         m.put("water#bottom", "minecraft:block/water_still");
         m.put("water#side", "minecraft:block/water_flow");

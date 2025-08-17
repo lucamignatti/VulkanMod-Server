@@ -491,6 +491,38 @@ public final class MeshBuilder {
         { 0, 0, 0 },
     };
 
+    // Water-specific face variants that cap height at 0.875 to reduce edge grid lines
+    private static final float[][] FACE_NZ_WATER = new float[][] {
+        { 0, 0, 0 },
+        { 1, 0, 0 },
+        { 1, 0.875f, 0 },
+        { 0, 0.875f, 0 },
+    };
+    private static final float[][] FACE_PZ_WATER = new float[][] {
+        { 1, 0, 1 },
+        { 0, 0, 1 },
+        { 0, 0.875f, 1 },
+        { 1, 0.875f, 1 },
+    };
+    private static final float[][] FACE_NX_WATER = new float[][] {
+        { 0, 0, 1 },
+        { 0, 0, 0 },
+        { 0, 0.875f, 0 },
+        { 0, 0.875f, 1 },
+    };
+    private static final float[][] FACE_PX_WATER = new float[][] {
+        { 1, 0, 0 },
+        { 1, 0, 1 },
+        { 1, 0.875f, 1 },
+        { 1, 0.875f, 0 },
+    };
+    private static final float[][] FACE_PY_WATER = new float[][] {
+        { 0, 0.875f, 0 },
+        { 1, 0.875f, 0 },
+        { 1, 0.875f, 1 },
+        { 0, 0.875f, 1 },
+    };
+
     private void emitFaceQuad(
         GrowableFloatArray vtx,
         GrowableIntArray idx,
@@ -659,7 +691,7 @@ public final class MeshBuilder {
                 tv = 1.0f - cz;
             }
 
-            // Remap into atlas region
+            // Remap into atlas region (no rotation; future per-block flow handling)
             float uu = u0 + tu * du;
             float vv = v0 + tv * dv;
             vtx.add(uu);
@@ -716,6 +748,32 @@ public final class MeshBuilder {
             b *= tb;
         }
 
+        // Translucent materials: disable per-vertex AO. Water gets uniform, sky-only lighting sampled above surface; others use flat lighting.
+        if ("water".equals(__k)) {
+            this.accRef = null; // ensure emitFaceQuad doesn't apply per-vertex lighting
+            // Use averaged sky light from a 3x3 cross above the water surface; ignore block light and remove directional shading.
+            float sky0 = clamp01(acc.getSkyLight(x, y + 1, z) / 15.0f);
+            float skyN = clamp01(acc.getSkyLight(x, y + 1, z - 1) / 15.0f);
+            float skyS = clamp01(acc.getSkyLight(x, y + 1, z + 1) / 15.0f);
+            float skyW = clamp01(acc.getSkyLight(x - 1, y + 1, z) / 15.0f);
+            float skyE = clamp01(acc.getSkyLight(x + 1, y + 1, z) / 15.0f);
+            float skyAvg = clamp01((sky0 + skyN + skyS + skyW + skyE) / 5.0f);
+            // Uniform luminance without directional sun shading to eliminate grid lines
+            float lum = clamp01(0.5f + 0.5f * skyAvg);
+            outColor[0] = powf(r * lum, cfg.gamma);
+            outColor[1] = powf(g * lum, cfg.gamma);
+            outColor[2] = powf(b * lum, cfg.gamma);
+            // Slight alpha clamp on water TOP faces to reduce harsh edges without hiding surfaces
+            outColor[3] = (nrm[1] == 1.0f) ? Math.min(a, 0.92f) : a;
+            return outColor;
+        } else if (
+            "ice".equals(__k) || "honey".equals(__k) || "glass".equals(__k)
+        ) {
+            this.accRef = null; // ensure emitFaceQuad doesn't apply per-vertex lighting
+            float[] flatBase = new float[] { r, g, b, a };
+            return applyFlatLighting(acc, x, y, z, nrm, flatBase, outColor);
+        }
+
         outColor[0] = r;
         outColor[1] = g;
         outColor[2] = b;
@@ -733,6 +791,8 @@ public final class MeshBuilder {
         float[] baseColor,
         float[] outColor
     ) {
+        // Disable per-vertex AO/lighting for flat-lit faces
+        this.accRef = null;
         // Sky/block light in [0..1]
         float sky = clamp01(acc.getSkyLight(x, y, z) / 15.0f);
         float blk = clamp01(acc.getBlockLight(x, y, z) / 15.0f);
