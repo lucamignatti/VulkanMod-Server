@@ -1,8 +1,12 @@
 package net.vulkanmod.server.mesh;
 
+import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeSpecialEffects;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
@@ -70,6 +74,10 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private final byte[] sky; // 0..15
     private final byte[] blk; // 0..15
     private final byte[] key; // category key code
+    // Coarse-grid biome tint (packed 0xRRGGBB) and grid metadata
+    private int[] tint;
+    private int tintStep;
+    private int tintW, tintH;
 
     private WorldSnapshotAccessor(
         int minX,
@@ -167,7 +175,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             }
         }
 
-        return new WorldSnapshotAccessor(
+        // Build instance then precompute coarse-grid biome tints
+        WorldSnapshotAccessor snap = new WorldSnapshotAccessor(
             minX,
             cMinY,
             minZ,
@@ -181,6 +190,55 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             blk,
             key
         );
+
+        // Coarse grid step (in blocks). Keep small for reasonable fidelity; adjust later if needed.
+        final int step = 4;
+        final int sxTot = Math.max(0, maxX - minX);
+        final int szTot = Math.max(0, maxZ - minZ);
+        final int gx = Math.max(1, (sxTot + step - 1) / step);
+        final int gz = Math.max(1, (szTot + step - 1) / step);
+        final int yMid = cMinY + (Math.max(0, cMaxY - cMinY) / 2);
+
+        int[] tt = new int[gx * gz];
+
+        for (int j = 0; j < gz; j++) {
+            int z0 = minZ + j * step + (step / 2);
+            if (z0 >= maxZ) z0 = Math.max(minZ, maxZ - 1);
+            for (int i = 0; i < gx; i++) {
+                int x0 = minX + i * step + (step / 2);
+                if (x0 >= maxX) x0 = Math.max(minX, maxX - 1);
+
+                pos.set(x0, yMid, z0);
+
+                int col = 0xFFFFFF;
+                try {
+                    Holder<Biome> h = world.getBiome(pos);
+                    Biome biome = h.value();
+                    BiomeSpecialEffects fx = biome.getSpecialEffects();
+                    var grass = fx.getGrassColorOverride();
+                    var foliage = fx.getFoliageColorOverride();
+                    if (grass.isPresent()) {
+                        col = grass.get();
+                    } else if (foliage.isPresent()) {
+                        col = foliage.get();
+                    } else {
+                        // No overrides; keep neutral. Water tint handled by texture; revisit in Phase 4 if needed.
+                        col = 0xFFFFFF;
+                    }
+                } catch (Throwable t) {
+                    col = 0xFFFFFF;
+                }
+
+                tt[j * gx + i] = col;
+            }
+        }
+
+        snap.tint = tt;
+        snap.tintStep = step;
+        snap.tintW = gx;
+        snap.tintH = gz;
+
+        return snap;
     }
 
     @Override
@@ -207,11 +265,26 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         return blk[idxLocal(x, y, z)] & 0xFF;
     }
 
-    // Biome tint accessor (packed 0xRRGGBB).
-    // Current snapshot does not store tints; returns neutral white as a safe default.
+    // Biome tint accessor (packed 0xRRGGBB). Uses coarse-grid precomputed values.
     public int getBiomeTintRGB(int x, int y, int z) {
         if (!inBounds(x, y, z)) return 0xFFFFFF;
-        return 0xFFFFFF;
+        if (
+            this.tint == null ||
+            this.tintW <= 0 ||
+            this.tintH <= 0 ||
+            this.tintStep <= 0
+        ) {
+            return 0xFFFFFF;
+        }
+        int ix = (x - this.minX) / this.tintStep;
+        int iz = (z - this.minZ) / this.tintStep;
+        if (ix < 0) ix = 0;
+        if (iz < 0) iz = 0;
+        if (ix >= this.tintW) ix = this.tintW - 1;
+        if (iz >= this.tintH) iz = this.tintH - 1;
+        int idx = iz * this.tintW + ix;
+        if (idx < 0 || idx >= this.tint.length) return 0xFFFFFF;
+        return this.tint[idx];
     }
 
     // Offset helpers to avoid repeated addition and bounds checks at call sites
