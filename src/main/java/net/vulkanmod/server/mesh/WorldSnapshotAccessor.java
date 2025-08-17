@@ -207,6 +207,45 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         return blk[idxLocal(x, y, z)] & 0xFF;
     }
 
+    // Biome tint accessor (packed 0xRRGGBB).
+    // Current snapshot does not store tints; returns neutral white as a safe default.
+    public int getBiomeTintRGB(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return 0xFFFFFF;
+        return 0xFFFFFF;
+    }
+
+    // Offset helpers to avoid repeated addition and bounds checks at call sites
+    public boolean isAirOffset(int x, int y, int z, int ox, int oy, int oz) {
+        int nx = x + ox,
+            ny = y + oy,
+            nz = z + oz;
+        if (!inBounds(nx, ny, nz)) return true;
+        return air[idxLocal(nx, ny, nz)];
+    }
+
+    public int getSkyLightOffset(int x, int y, int z, int ox, int oy, int oz) {
+        int nx = x + ox,
+            ny = y + oy,
+            nz = z + oz;
+        if (!inBounds(nx, ny, nz)) return 15;
+        return sky[idxLocal(nx, ny, nz)] & 0xFF;
+    }
+
+    public int getBlockLightOffset(
+        int x,
+        int y,
+        int z,
+        int ox,
+        int oy,
+        int oz
+    ) {
+        int nx = x + ox,
+            ny = y + oy,
+            nz = z + oz;
+        if (!inBounds(nx, ny, nz)) return 0;
+        return blk[idxLocal(nx, ny, nz)] & 0xFF;
+    }
+
     @Override
     public int getMinY() {
         return Math.max(minY, worldMinY);

@@ -53,6 +53,41 @@ public final class MeshBuilder {
         int getBlockLight(int x, int y, int z);
 
         // Optional world Y range (if not provided here, use the call-site minY/maxY)
+        // Convenience offset helpers
+        default boolean isAirOffset(
+            int x,
+            int y,
+            int z,
+            int ox,
+            int oy,
+            int oz
+        ) {
+            return isAir(x + ox, y + oy, z + oz);
+        }
+
+        default int getSkyLightOffset(
+            int x,
+            int y,
+            int z,
+            int ox,
+            int oy,
+            int oz
+        ) {
+            return getSkyLight(x + ox, y + oy, z + oz);
+        }
+
+        default int getBlockLightOffset(
+            int x,
+            int y,
+            int z,
+            int ox,
+            int oy,
+            int oz
+        ) {
+            return getBlockLight(x + ox, y + oy, z + oz);
+        }
+
+        // Optional world Y range (if not provided here, use the call-site minY/maxY)
         default int getMinY() {
             return 0;
         }
@@ -78,6 +113,7 @@ public final class MeshBuilder {
     }
 
     private final Config cfg;
+    private BlockAccessor accRef; // transient accessor set during build for per-vertex lighting/AO
 
     public MeshBuilder() {
         this(new Config());
@@ -543,6 +579,14 @@ public final class MeshBuilder {
         final float du = (u1 - u0);
         final float dv = (v1 - v0);
 
+        // Precompute directional shade from sun for this face
+        float ndotl = clamp01(
+            normal[0] * cfg.sunDirection[0] +
+            normal[1] * cfg.sunDirection[1] +
+            normal[2] * cfg.sunDirection[2]
+        );
+        float shade = clamp01(cfg.ambientMin + cfg.sunIntensity * ndotl);
+
         // 4 vertices
         for (int i = 0; i < 4; i++) {
             float cx = corners[i][0];
@@ -561,11 +605,98 @@ public final class MeshBuilder {
             vtx.add(normal[0]);
             vtx.add(normal[1]);
             vtx.add(normal[2]);
+
+            // Per-vertex lighting + AO (if accessor available), else use incoming color
+            float colR = color[0],
+                colG = color[1],
+                colB = color[2],
+                colA = color[3];
+            if (this.accRef != null) {
+                // Corner-based light sampling near this vertex
+                int sx =
+                    bx +
+                    ((normal[0] < 0)
+                            ? -1
+                            : (normal[0] > 0 ? 1 : (cx >= 0.5f ? 1 : 0)));
+                int sy =
+                    by +
+                    ((normal[1] < 0)
+                            ? -1
+                            : (normal[1] > 0 ? 1 : (cy >= 0.5f ? 1 : 0)));
+                int sz =
+                    bz +
+                    ((normal[2] < 0)
+                            ? -1
+                            : (normal[2] > 0 ? 1 : (cz >= 0.5f ? 1 : 0)));
+
+                float sky = clamp01(
+                    this.accRef.getSkyLight(sx, sy, sz) / 15.0f
+                );
+                float blk = clamp01(
+                    this.accRef.getBlockLight(sx, sy, sz) / 15.0f
+                );
+                float lmix =
+                    cfg.skyLightWeight * sky +
+                    (1.0f - cfg.skyLightWeight) * blk;
+
+                // Face-local ambient occlusion from neighbor occupancy at this corner
+                float ao = 1.0f;
+                if (normal[2] != 0.0f) {
+                    int nz = normal[2] < 0.0f ? -1 : 1;
+                    int dui = (cx >= 0.5f) ? 1 : 0; // along +X
+                    int dvi = (cy >= 0.5f) ? 1 : 0; // along +Y
+                    boolean occU = !this.accRef.isAir(bx + dui, by, bz + nz);
+                    boolean occV = !this.accRef.isAir(bx, by + dvi, bz + nz);
+                    boolean occC = !this.accRef.isAir(
+                        bx + dui,
+                        by + dvi,
+                        bz + nz
+                    );
+                    int occCount =
+                        (occU ? 1 : 0) + (occV ? 1 : 0) + (occC ? 1 : 0);
+                    ao = clamp01(1.0f - 0.25f * occCount);
+                } else if (normal[0] != 0.0f) {
+                    int nx = normal[0] < 0.0f ? -1 : 1;
+                    int dui = (cz >= 0.5f) ? 1 : 0; // along +Z
+                    int dvi = (cy >= 0.5f) ? 1 : 0; // along +Y
+                    boolean occU = !this.accRef.isAir(bx + nx, by, bz + dui);
+                    boolean occV = !this.accRef.isAir(bx + nx, by + dvi, bz);
+                    boolean occC = !this.accRef.isAir(
+                        bx + nx,
+                        by + dvi,
+                        bz + dui
+                    );
+                    int occCount =
+                        (occU ? 1 : 0) + (occV ? 1 : 0) + (occC ? 1 : 0);
+                    ao = clamp01(1.0f - 0.25f * occCount);
+                } else {
+                    int ny = normal[1] < 0.0f ? -1 : 1;
+                    int dui = (cx >= 0.5f) ? 1 : 0; // along +X
+                    int dvi = (cz >= 0.5f) ? 1 : 0; // along +Z
+                    boolean occU = !this.accRef.isAir(bx + dui, by + ny, bz);
+                    boolean occV = !this.accRef.isAir(bx, by + ny, bz + dvi);
+                    boolean occC = !this.accRef.isAir(
+                        bx + dui,
+                        by + ny,
+                        bz + dvi
+                    );
+                    int occCount =
+                        (occU ? 1 : 0) + (occV ? 1 : 0) + (occC ? 1 : 0);
+                    ao = clamp01(1.0f - 0.25f * occCount);
+                }
+
+                float lum = clamp01(shade * (0.5f + 0.5f * lmix) * ao);
+                colR = powf(color[0] * lum, cfg.gamma);
+                colG = powf(color[1] * lum, cfg.gamma);
+                colB = powf(color[2] * lum, cfg.gamma);
+                colA = color[3];
+            }
+
             // color (4)
-            vtx.add(color[0]);
-            vtx.add(color[1]);
-            vtx.add(color[2]);
-            vtx.add(color[3]);
+            vtx.add(colR);
+            vtx.add(colG);
+            vtx.add(colB);
+            vtx.add(colA);
 
             // uv (2) — choose mapping based on dominant axis of normal
             float tu, tv;
@@ -626,6 +757,47 @@ public final class MeshBuilder {
         float[] baseColor,
         float[] outColor
     ) {
+        // Defer lighting to per-vertex computation in emitFaceQuad; also bake biome tint for select keys.
+        // Capture accessor so emitFaceQuad can sample local lights and occupancy.
+        this.accRef = acc;
+
+        // Start from base color then apply biome tint for grass/leaves/water
+        float r = baseColor[0],
+            g = baseColor[1],
+            b = baseColor[2],
+            a = baseColor[3];
+        String __k = safeKey(acc.getBlockKey(x, y, z));
+        if (
+            "grass".equals(__k) || "leaves".equals(__k) || "water".equals(__k)
+        ) {
+            if (acc instanceof WorldSnapshotAccessor ws) {
+                int rgb = ws.getBiomeTintRGB(x, y, z);
+                float tr = ((rgb >> 16) & 0xFF) / 255.0f;
+                float tg = ((rgb >> 8) & 0xFF) / 255.0f;
+                float tb = (rgb & 0xFF) / 255.0f;
+                r *= tr;
+                g *= tg;
+                b *= tb;
+            }
+        }
+
+        outColor[0] = r;
+        outColor[1] = g;
+        outColor[2] = b;
+        outColor[3] = a;
+        return outColor;
+    }
+
+    // Flat (face-level) lighting utility for billboards and non-smooth cases
+    private float[] applyFlatLighting(
+        BlockAccessor acc,
+        int x,
+        int y,
+        int z,
+        float[] nrm,
+        float[] baseColor,
+        float[] outColor
+    ) {
         // Sky/block light in [0..1]
         float sky = clamp01(acc.getSkyLight(x, y, z) / 15.0f);
         float blk = clamp01(acc.getBlockLight(x, y, z) / 15.0f);
@@ -638,8 +810,7 @@ public final class MeshBuilder {
             nrm[1] * cfg.sunDirection[1] +
             nrm[2] * cfg.sunDirection[2]
         );
-        float shade = cfg.ambientMin + cfg.sunIntensity * ndotl;
-        shade = clamp01(shade);
+        float shade = clamp01(cfg.ambientMin + cfg.sunIntensity * ndotl);
 
         float lum = clamp01(shade * (0.5f + 0.5f * lmix)); // simple remap
 
@@ -747,7 +918,7 @@ public final class MeshBuilder {
 
                         // Simple up-facing normal for lighting
                         set3(nrm, 0, 1, 0);
-                        float[] colBB = applyLighting(
+                        float[] colBB = applyFlatLighting(
                             acc,
                             x,
                             y,
