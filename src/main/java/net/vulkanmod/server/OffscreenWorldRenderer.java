@@ -1707,7 +1707,7 @@ public final class OffscreenWorldRenderer {
                         cfg.minY = minY;
                         cfg.maxY = maxY;
                         MeshBuilder builder = new MeshBuilder(cfg);
-                        long version = 1L;
+                        long version = System.currentTimeMillis();
                         buildFuture.complete(
                             builder.buildRegionLayered(
                                 snap,
@@ -1754,7 +1754,13 @@ public final class OffscreenWorldRenderer {
                     refMesh.getRegionChunkZ(),
                     refMesh.getRegionSizeChunks()
                 );
+                // TEMP: invalidate per frame to reflect player-placed blocks
                 RegionCacheEntry existing = regionCache.get(key);
+                if (existing != null) {
+                    // Clear existing cache entry to force re-upload
+                    regionCache.remove(key);
+                    existing = null;
+                }
 
                 boolean needsUpload =
                     existing == null ||
@@ -2911,6 +2917,7 @@ public final class OffscreenWorldRenderer {
                 .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
                 .module(fragModuleCutout)
                 .pName(stack.ASCII("main"));
+            rs.cullMode(VK_CULL_MODE_NONE);
             gpc.get(0).pStages(stagesCutout);
             pPipe.rewind();
             int err3 = vkCreateGraphicsPipelines(

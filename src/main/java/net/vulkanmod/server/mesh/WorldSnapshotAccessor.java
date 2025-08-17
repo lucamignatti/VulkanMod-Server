@@ -47,6 +47,13 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private static final byte KEY_REDSTONE = 16;
     private static final byte KEY_LAPIS = 17;
     private static final byte KEY_OBSIDIAN = 18;
+    // Flora / non-full blocks and light sources (billboard/cutout families)
+    private static final byte KEY_SHORT_GRASS = 19;
+    private static final byte KEY_TALL_GRASS = 20;
+    private static final byte KEY_FERN = 21;
+    private static final byte KEY_DEAD_BUSH = 22;
+    private static final byte KEY_KELP = 23;
+    private static final byte KEY_TORCH = 24;
 
     // Snapshot bounds in world block coordinates (min inclusive, max exclusive)
     private final int minX, minY, minZ;
@@ -275,6 +282,25 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             return true;
         }
 
+        // Flora/billboard and torches should not occlude neighboring faces
+        if (
+            block == Blocks.SHORT_GRASS ||
+            block == Blocks.TALL_GRASS ||
+            block == Blocks.FERN ||
+            block == Blocks.LARGE_FERN ||
+            block == Blocks.DEAD_BUSH ||
+            block == Blocks.KELP ||
+            block == Blocks.KELP_PLANT ||
+            block == Blocks.TORCH ||
+            block == Blocks.WALL_TORCH ||
+            block == Blocks.SOUL_TORCH ||
+            block == Blocks.SOUL_WALL_TORCH ||
+            block == Blocks.REDSTONE_TORCH ||
+            block == Blocks.REDSTONE_WALL_TORCH
+        ) {
+            return true;
+        }
+
         // Most transparent blocks (but keep it conservative)
         if (
             block instanceof TransparentBlock &&
@@ -383,6 +409,23 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
 
         if (block == Blocks.WATER) return KEY_WATER;
 
+        // Flora / non-full blocks (billboard/cutout)
+        if (block == Blocks.SHORT_GRASS) return KEY_SHORT_GRASS; // short grass
+        if (block == Blocks.TALL_GRASS) return KEY_TALL_GRASS;
+        if (block == Blocks.FERN || block == Blocks.LARGE_FERN) return KEY_FERN;
+        if (block == Blocks.DEAD_BUSH) return KEY_DEAD_BUSH;
+        if (block == Blocks.KELP || block == Blocks.KELP_PLANT) return KEY_KELP;
+
+        // Torches (non-occluding light sources)
+        if (
+            block == Blocks.TORCH ||
+            block == Blocks.WALL_TORCH ||
+            block == Blocks.SOUL_TORCH ||
+            block == Blocks.SOUL_WALL_TORCH ||
+            block == Blocks.REDSTONE_TORCH ||
+            block == Blocks.REDSTONE_WALL_TORCH
+        ) return KEY_TORCH;
+
         if (
             block == Blocks.GLASS ||
             block == Blocks.TINTED_GLASS ||
@@ -414,6 +457,12 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             case KEY_REDSTONE -> "redstone";
             case KEY_LAPIS -> "lapis";
             case KEY_OBSIDIAN -> "obsidian";
+            case KEY_SHORT_GRASS -> "short_grass";
+            case KEY_TALL_GRASS -> "tall_grass";
+            case KEY_FERN -> "fern";
+            case KEY_DEAD_BUSH -> "dead_bush";
+            case KEY_KELP -> "kelp";
+            case KEY_TORCH -> "torch";
             default -> "default";
         };
     }
@@ -464,5 +513,38 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         if (name == null) return false;
         String s = name.toLowerCase(java.util.Locale.ROOT);
         return "leaves".equals(s) || "glass".equals(s);
+    }
+
+    /**
+     * Helper to detect flora/torch-style billboard cutouts that should be meshed as crossed quads
+     * and rendered in the CUTOUT layer (non-occluding).
+     */
+    public boolean isBillboardCutout(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return false;
+        byte k = key[idxLocal(x, y, z)];
+        return (
+            k == KEY_SHORT_GRASS ||
+            k == KEY_TALL_GRASS ||
+            k == KEY_FERN ||
+            k == KEY_DEAD_BUSH ||
+            k == KEY_KELP ||
+            k == KEY_TORCH
+        );
+    }
+
+    /**
+     * Static helper when only a block key/category name is available.
+     */
+    public static boolean isBillboardCutoutKeyName(String name) {
+        if (name == null) return false;
+        String s = name.toLowerCase(java.util.Locale.ROOT);
+        return (
+            "short_grass".equals(s) ||
+            "tall_grass".equals(s) ||
+            "fern".equals(s) ||
+            "dead_bush".equals(s) ||
+            "kelp".equals(s) ||
+            "torch".equals(s)
+        );
     }
 }

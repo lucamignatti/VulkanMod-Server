@@ -89,10 +89,8 @@ public final class MeshBuilder {
             new float[] { 0, 1, 0 }
         );
         norm3InPlace(cfg.sunDirection);
-        if (cfg.colorLUT == null) cfg.colorLUT = defaultColorLUT();
-        if (
-            cfg.defaultColor == null || cfg.defaultColor.length < 4
-        ) cfg.defaultColor = new float[] { 1, 1, 1, 1 };
+        if (cfg.colorLUT == null) cfg.colorLUT = new java.util.HashMap<>();
+        cfg.defaultColor = new float[] { 1, 1, 1, 1 };
         if (cfg.minY >= cfg.maxY) {
             // ensure sane range
             cfg.minY = 0;
@@ -156,11 +154,10 @@ public final class MeshBuilder {
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
-                    // Resolve UV region from the server-side texture atlas for this block key (default to "side" face)
+                    // Resolve UV region from the server-side texture atlas for this block key
                     ServerTextureAtlas.Region __uv =
-                        ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                            key,
-                            "side"
+                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                            key
                         );
                     float u0 = __uv.u0,
                         v0 = __uv.v0,
@@ -173,6 +170,29 @@ public final class MeshBuilder {
                     // North (-Z)
                     if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
                         set3(nrm, 0, 0, -1);
+                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_side;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "side"
+                                );
+                        } else {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -190,15 +210,38 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // South (+Z)
                     if (isAirOrOOB(acc, x, y, z + 1, minY, maxY)) {
                         set3(nrm, 0, 0, 1);
+                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_side;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "side"
+                                );
+                        } else {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -216,15 +259,38 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // West (-X)
                     if (isAirOrOOB(acc, x - 1, y, z, minY, maxY)) {
                         set3(nrm, -1, 0, 0);
+                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_side;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "side"
+                                );
+                        } else {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -242,15 +308,38 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // East (+X)
                     if (isAirOrOOB(acc, x + 1, y, z, minY, maxY)) {
                         set3(nrm, 1, 0, 0);
+                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_side;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "side"
+                                );
+                        } else {
+                            __uv_side =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -268,21 +357,34 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // Top (+Y)
                     if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
                         set3(nrm, 0, 1, 0);
-                        // Use per-face atlas region for "top"
-                        ServerTextureAtlas.Region __uv_t =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
-                                "top"
-                            );
+                        // Use per-face atlas region for "top" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_t;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_t =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "top"
+                                );
+                        } else {
+                            __uv_t =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
                         float tu0 = __uv_t.u0,
                             tv0 = __uv_t.v0,
                             tu1 = __uv_t.u1,
@@ -313,12 +415,25 @@ public final class MeshBuilder {
                     // Bottom (-Y)
                     if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
                         set3(nrm, 0, -1, 0);
-                        // Use per-face atlas region for "bottom"
-                        ServerTextureAtlas.Region __uv_b =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
-                                "bottom"
-                            );
+                        // Use per-face atlas region for "bottom" if available, otherwise fallback to block-level
+                        ServerTextureAtlas.Region __uv_b;
+                        if (
+                            "grass".equals(key) ||
+                            "wood".equals(key) ||
+                            "dirt".equals(key) ||
+                            "stone".equals(key)
+                        ) {
+                            __uv_b =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                    key,
+                                    "bottom"
+                                );
+                        } else {
+                            __uv_b =
+                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                    key
+                                );
+                        }
                         float bu0 = __uv_b.u0,
                             bv0 = __uv_b.v0,
                             bu1 = __uv_b.u1,
@@ -536,28 +651,7 @@ public final class MeshBuilder {
     }
 
     private static Map<String, float[]> defaultColorLUT() {
-        Map<String, float[]> m = new HashMap<>();
-        // Simple distinctive colors (linear-ish, assuming further gamma at display)
-        m.put("grass", rgba(0x4CAF50));
-        m.put("stone", rgba(0x9E9E9E));
-        m.put("dirt", rgba(0x795548));
-        m.put("leaves", rgba(0x2E7D32));
-        m.put("wood", rgba(0x8D6E63));
-        m.put("sand", rgba(0xE0C085));
-        m.put("water", rgba(0x1E88E5));
-        m.put("glass", rgba(0x90CAF9));
-        m.put("sandstone", rgba(0xD7CCC8));
-        m.put("gravel", rgba(0xB0BEC5));
-        m.put("clay", rgba(0x90A4AE));
-        m.put("coal", rgba(0x424242));
-        m.put("iron", rgba(0xB0BEC5));
-        m.put("gold", rgba(0xFBC02D));
-        m.put("diamond", rgba(0x26C6DA));
-        m.put("redstone", rgba(0xEF5350));
-        m.put("lapis", rgba(0x1A237E));
-        m.put("obsidian", rgba(0x2C2D3A));
-        // Fallback logic will use default color if key missing
-        return m;
+        return new HashMap<>();
     }
 
     private static float[] rgba(int rgb) {
@@ -575,7 +669,16 @@ public final class MeshBuilder {
     private static boolean isCutoutKey(String k) {
         if (k == null) return false;
         String s = k.toLowerCase();
-        return "leaves".equals(s) || "glass".equals(s);
+        return (
+            "leaves".equals(s) ||
+            "glass".equals(s) ||
+            "short_grass".equals(s) ||
+            "tall_grass".equals(s) ||
+            "fern".equals(s) ||
+            "dead_bush".equals(s) ||
+            "kelp".equals(s) ||
+            "torch".equals(s)
+        );
     }
 
     public LayeredRegionMesh buildRegionLayered(
@@ -626,11 +729,172 @@ public final class MeshBuilder {
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
-                    // Resolve UV region from the server-side texture atlas for this block key (default to "side" face)
+                    // Billboard-style cutouts (flora/torch/kelp): emit crossed quads into CUTOUT and continue
+                    if (
+                        "short_grass".equals(key) ||
+                        "tall_grass".equals(key) ||
+                        "fern".equals(key) ||
+                        "dead_bush".equals(key) ||
+                        "kelp".equals(key) ||
+                        "torch".equals(key)
+                    ) {
+                        ServerTextureAtlas.Region __uvbb =
+                            ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                                key
+                            );
+                        float bu0 = __uvbb.u0,
+                            bv0 = __uvbb.v0,
+                            bu1 = __uvbb.u1,
+                            bv1 = __uvbb.v1;
+
+                        // Simple up-facing normal for lighting
+                        set3(nrm, 0, 1, 0);
+                        float[] colBB = applyLighting(
+                            acc,
+                            x,
+                            y,
+                            z,
+                            nrm,
+                            baseColor,
+                            faceColor
+                        );
+
+                        // Emit first diagonal quad (0,0,0) -> (1,1,1)
+                        {
+                            final int baseIndex = vtxCutout.countVertices();
+                            // v0
+                            vtxCutout.add(x + 0.0f);
+                            vtxCutout.add(y + 0.0f);
+                            vtxCutout.add(z + 0.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu0);
+                            vtxCutout.add(bv1);
+                            // v1
+                            vtxCutout.add(x + 1.0f);
+                            vtxCutout.add(y + 0.0f);
+                            vtxCutout.add(z + 1.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu1);
+                            vtxCutout.add(bv1);
+                            // v2
+                            vtxCutout.add(x + 1.0f);
+                            vtxCutout.add(y + 1.0f);
+                            vtxCutout.add(z + 1.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu1);
+                            vtxCutout.add(bv0);
+                            // v3
+                            vtxCutout.add(x + 0.0f);
+                            vtxCutout.add(y + 1.0f);
+                            vtxCutout.add(z + 0.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu0);
+                            vtxCutout.add(bv0);
+                            // indices
+                            idxCutout.add(baseIndex + 0);
+                            idxCutout.add(baseIndex + 1);
+                            idxCutout.add(baseIndex + 2);
+                            idxCutout.add(baseIndex + 0);
+                            idxCutout.add(baseIndex + 2);
+                            idxCutout.add(baseIndex + 3);
+                        }
+
+                        // Emit second diagonal quad (1,0,0) -> (0,1,1)
+                        {
+                            final int baseIndex = vtxCutout.countVertices();
+                            // v0
+                            vtxCutout.add(x + 1.0f);
+                            vtxCutout.add(y + 0.0f);
+                            vtxCutout.add(z + 0.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu0);
+                            vtxCutout.add(bv1);
+                            // v1
+                            vtxCutout.add(x + 0.0f);
+                            vtxCutout.add(y + 0.0f);
+                            vtxCutout.add(z + 1.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu1);
+                            vtxCutout.add(bv1);
+                            // v2
+                            vtxCutout.add(x + 0.0f);
+                            vtxCutout.add(y + 1.0f);
+                            vtxCutout.add(z + 1.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu1);
+                            vtxCutout.add(bv0);
+                            // v3
+                            vtxCutout.add(x + 1.0f);
+                            vtxCutout.add(y + 1.0f);
+                            vtxCutout.add(z + 0.0f);
+                            vtxCutout.add(nrm[0]);
+                            vtxCutout.add(nrm[1]);
+                            vtxCutout.add(nrm[2]);
+                            vtxCutout.add(colBB[0]);
+                            vtxCutout.add(colBB[1]);
+                            vtxCutout.add(colBB[2]);
+                            vtxCutout.add(colBB[3]);
+                            vtxCutout.add(bu0);
+                            vtxCutout.add(bv0);
+                            // indices
+                            idxCutout.add(baseIndex + 0);
+                            idxCutout.add(baseIndex + 1);
+                            idxCutout.add(baseIndex + 2);
+                            idxCutout.add(baseIndex + 0);
+                            idxCutout.add(baseIndex + 2);
+                            idxCutout.add(baseIndex + 3);
+                        }
+
+                        // Done with billboard
+                        continue;
+                    }
+
+                    // Resolve UV region from the server-side texture atlas for this block key
                     ServerTextureAtlas.Region __uv =
-                        ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                            key,
-                            "side"
+                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                            key
                         );
                     float u0 = __uv.u0,
                         v0 = __uv.v0,
@@ -644,6 +908,16 @@ public final class MeshBuilder {
                     // North (-Z)
                     if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
                         set3(nrm, 0, 0, -1);
+                        // Always use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -661,15 +935,25 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // South (+Z)
                     if (isAirOrOOB(acc, x, y, z + 1, minY, maxY)) {
                         set3(nrm, 0, 0, 1);
+                        // Always use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -687,15 +971,25 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // West (-X)
                     if (isAirOrOOB(acc, x - 1, y, z, minY, maxY)) {
                         set3(nrm, -1, 0, 0);
+                        // Always use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -713,15 +1007,25 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // East (+X)
                     if (isAirOrOOB(acc, x + 1, y, z, minY, maxY)) {
                         set3(nrm, 1, 0, 0);
+                        // Always use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
+                        float su0 = __uv_side.u0,
+                            sv0 = __uv_side.v0,
+                            su1 = __uv_side.u1,
+                            sv1 = __uv_side.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -739,16 +1043,16 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            su0,
+                            sv0,
+                            su1,
+                            sv1
                         );
                     }
                     // Top (+Y)
                     if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
                         set3(nrm, 0, 1, 0);
-                        // Use per-face atlas region for "top"
+                        // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_t =
                             ServerTextureAtlas.getInstance().getRegionForBlockFace(
                                 key,
@@ -784,7 +1088,7 @@ public final class MeshBuilder {
                     // Bottom (-Y)
                     if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
                         set3(nrm, 0, -1, 0);
-                        // Use per-face atlas region for "bottom"
+                        // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_b =
                             ServerTextureAtlas.getInstance().getRegionForBlockFace(
                                 key,

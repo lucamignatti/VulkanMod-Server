@@ -600,6 +600,15 @@ public final class ServerTextureAtlas {
         m.put("redstone", "minecraft:block/redstone_ore");
         m.put("lapis", "minecraft:block/lapis_ore");
         m.put("obsidian", "minecraft:block/obsidian");
+
+        // Flora / non-full blocks (CUTOUT layer expected)
+        m.put("short_grass", "minecraft:block/short_grass");
+        m.put("tall_grass", "minecraft:block/tall_grass_top");
+        m.put("fern", "minecraft:block/fern");
+        m.put("dead_bush", "minecraft:block/dead_bush");
+        m.put("kelp", "minecraft:block/kelp");
+        m.put("torch", "minecraft:block/torch");
+
         m.put("default", "minecraft:block/stone");
         return m;
     }
@@ -614,7 +623,15 @@ public final class ServerTextureAtlas {
         // Wood: side (bark) and top (log end)
         m.put("wood#side", "minecraft:block/oak_log");
         m.put("wood#top", "minecraft:block/oak_log_top");
-        // Extend in future for more blocks as needed
+        m.put("wood#bottom", "minecraft:block/oak_log_top");
+        // Dirt: consistent texture for all faces
+        m.put("dirt#top", "minecraft:block/dirt");
+        m.put("dirt#side", "minecraft:block/dirt");
+        m.put("dirt#bottom", "minecraft:block/dirt");
+        // Stone: consistent texture for all faces
+        m.put("stone#top", "minecraft:block/stone");
+        m.put("stone#side", "minecraft:block/stone");
+        m.put("stone#bottom", "minecraft:block/stone");
         return m;
     }
 
