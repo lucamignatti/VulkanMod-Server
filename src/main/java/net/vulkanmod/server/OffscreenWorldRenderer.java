@@ -190,6 +190,7 @@ public final class OffscreenWorldRenderer {
     private long pipelineLayout;
     private long pipeline;
     private long pipelineCutout;
+    private long pipelineTranslucent;
     private long vertModule;
     private long fragModule;
     private long fragModuleCutout;
@@ -241,6 +242,10 @@ public final class OffscreenWorldRenderer {
         long cutoutVertexBuffer, cutoutVertexMemory;
         long cutoutIndexBuffer, cutoutIndexMemory;
         int cutoutIndexCount;
+
+        long translucentVertexBuffer, translucentVertexMemory;
+        long translucentIndexBuffer, translucentIndexMemory;
+        int translucentIndexCount;
 
         long version;
         long lastUsedNanos;
@@ -1657,9 +1662,10 @@ public final class OffscreenWorldRenderer {
             }
         }
 
-        // Build layered meshes: SOLID + CUTOUT
+        // Build layered meshes: SOLID + CUTOUT + TRANSLUCENT
         RegionMesh solidMesh = null;
         RegionMesh cutoutMesh = null;
+        RegionMesh translucentMesh = null;
         int regionSizeChunks = Math.max(2, Math.min(renderDistance, 16));
         try {
             if (world != null) {
@@ -1733,6 +1739,7 @@ public final class OffscreenWorldRenderer {
                     if (layered != null) {
                         solidMesh = layered.solid;
                         cutoutMesh = layered.cutout;
+                        translucentMesh = layered.translucent;
                     }
                 } catch (Throwable t) {
                     System.err.println(
@@ -1741,6 +1748,7 @@ public final class OffscreenWorldRenderer {
                     );
                     solidMesh = null;
                     cutoutMesh = null;
+                    translucentMesh = null;
                 }
             }
         } catch (Throwable t) {
@@ -1749,13 +1757,16 @@ public final class OffscreenWorldRenderer {
             );
             solidMesh = null;
             cutoutMesh = null;
+            translucentMesh = null;
         }
 
         // Upload/update GPU buffers per-layer
         RegionCacheEntry cacheEntry = null;
         try {
-            // Key by solid mesh identity (region coords/size are identical for both)
-            RegionMesh refMesh = solidMesh != null ? solidMesh : cutoutMesh;
+            // Key by mesh identity (region coords/size are identical across layers)
+            RegionMesh refMesh = (solidMesh != null)
+                ? solidMesh
+                : ((cutoutMesh != null) ? cutoutMesh : translucentMesh);
             if (refMesh != null && !refMesh.isEmpty()) {
                 RegionKey key = new RegionKey(
                     refMesh.getRegionChunkX(),
@@ -1816,6 +1827,32 @@ public final class OffscreenWorldRenderer {
                         if (existing.cutoutIndexMemory != 0L) vkFreeMemory(
                             device,
                             existing.cutoutIndexMemory,
+                            null
+                        );
+                        if (
+                            existing.translucentVertexBuffer != 0L
+                        ) vkDestroyBuffer(
+                            device,
+                            existing.translucentVertexBuffer,
+                            null
+                        );
+                        if (
+                            existing.translucentVertexMemory != 0L
+                        ) vkFreeMemory(
+                            device,
+                            existing.translucentVertexMemory,
+                            null
+                        );
+                        if (
+                            existing.translucentIndexBuffer != 0L
+                        ) vkDestroyBuffer(
+                            device,
+                            existing.translucentIndexBuffer,
+                            null
+                        );
+                        if (existing.translucentIndexMemory != 0L) vkFreeMemory(
+                            device,
+                            existing.translucentIndexMemory,
                             null
                         );
                     }
@@ -1907,6 +1944,50 @@ public final class OffscreenWorldRenderer {
                         e.cutoutIndexBuffer = 0L;
                         e.cutoutIndexCount = 0;
                     }
+                    // Upload TRANSLUCENT
+                    if (translucentMesh != null && !translucentMesh.isEmpty()) {
+                        int vtxBytesT =
+                            translucentMesh.getVertexBufferSizeBytes();
+                        int idxBytesT =
+                            translucentMesh.getIndexBufferSizeBytes();
+                        BufferAlloc vboT = createBuffer(
+                            vtxBytesT,
+                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        BufferAlloc iboT = createBuffer(
+                            idxBytesT,
+                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        {
+                            FloatBuffer vfb =
+                                translucentMesh.getInterleavedVertices();
+                            IntBuffer ifb = translucentMesh.getIndices();
+                            ByteBuffer vSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(vfb),
+                                vtxBytesT
+                            );
+                            ByteBuffer iSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(ifb),
+                                idxBytesT
+                            );
+                            if (!uploadBuffer(vboT.buffer, vSrc)) return null;
+                            if (!uploadBuffer(iboT.buffer, iSrc)) return null;
+                            e.translucentVertexBuffer = vboT.buffer;
+                            e.translucentVertexMemory = vboT.memory;
+                            e.translucentIndexBuffer = iboT.buffer;
+                            e.translucentIndexMemory = iboT.memory;
+                            e.translucentIndexCount =
+                                translucentMesh.getIndexCount();
+                        }
+                    } else {
+                        e.translucentVertexBuffer = 0L;
+                        e.translucentIndexBuffer = 0L;
+                        e.translucentIndexCount = 0;
+                    }
 
                     e.version = refMesh.getVersion();
                     e.lastUsedNanos = System.nanoTime();
@@ -1929,7 +2010,8 @@ public final class OffscreenWorldRenderer {
         if (
             cacheEntry == null ||
             (cacheEntry.solidIndexCount <= 0 &&
-                cacheEntry.cutoutIndexCount <= 0)
+                cacheEntry.cutoutIndexCount <= 0 &&
+                cacheEntry.translucentIndexCount <= 0)
         ) {
             System.out.println(
                 "OffscreenWorldRenderer: no region mesh/buffers available — returning cleared frame (no draw)"
@@ -2149,6 +2231,165 @@ public final class OffscreenWorldRenderer {
                         0
                     );
                 }
+
+                // Draw TRANSLUCENT
+                if (
+                    cacheEntry.translucentIndexCount > 0 &&
+                    pipelineTranslucent != 0L
+                ) {
+                    vkCmdBindPipeline(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineTranslucent
+                    );
+                    // Bind VB/IB for translucent
+                    LongBuffer pVBt = stack.mallocLong(1);
+                    pVBt.put(0, cacheEntry.translucentVertexBuffer);
+                    LongBuffer pOfft = stack.mallocLong(1);
+                    pOfft.put(0, 0L);
+                    vkCmdBindVertexBuffers(commandBuffer, 0, pVBt, pOfft);
+                    vkCmdBindIndexBuffer(
+                        commandBuffer,
+                        cacheEntry.translucentIndexBuffer,
+                        0L,
+                        VK_INDEX_TYPE_UINT32
+                    );
+                    // Coarse back-to-front sorting for translucent faces by centroid depth along view direction.
+                    // Build face ranges (6 indices per quad) and sort by depth.
+                    {
+                        // Camera forward from yaw/pitch (approximate, consistent ordering)
+                        double pr = Math.toRadians(pitch);
+                        double yr = Math.toRadians(yaw);
+                        double cp = Math.cos(pr),
+                            sp = Math.sin(pr);
+                        double fx = -Math.sin(yr) * cp;
+                        double fy = -sp;
+                        double fz = Math.cos(yr) * cp;
+
+                        // Access CPU-side mesh to compute approximate depths
+                        java.util.List<Object> ranges =
+                            new java.util.ArrayList<>(
+                                Math.max(
+                                    1,
+                                    cacheEntry.translucentIndexCount / 6
+                                )
+                            );
+                        final RegionMesh tMesh = translucentMesh;
+                        if (tMesh != null && !tMesh.isEmpty()) {
+                            java.nio.FloatBuffer vfb =
+                                tMesh.getInterleavedVertices();
+                            java.nio.IntBuffer ifb = tMesh.getIndices();
+                            final int vertexCount = tMesh.getVertexCount();
+                            final int floatsTotal = vfb.remaining();
+                            final int stride = (vertexCount > 0)
+                                ? (floatsTotal / vertexCount)
+                                : 12; // expect 12 (pos3,nrm3,col4,uv2)
+                            final int faceCount =
+                                cacheEntry.translucentIndexCount / 6;
+
+                            class DR {
+
+                                final int first, count;
+                                final float depth;
+
+                                DR(int first, int count, float depth) {
+                                    this.first = first;
+                                    this.count = count;
+                                    this.depth = depth;
+                                }
+                            }
+
+                            for (int i = 0; i < faceCount; i++) {
+                                final int base = i * 6;
+                                final int i0 = ifb.get(base + 0);
+                                final int i1 = ifb.get(base + 1);
+                                final int i2 = ifb.get(base + 2);
+                                final int i3 = ifb.get(base + 5); // (0,1,2) (0,2,3) -> last is 3
+
+                                final int o0 = i0 * stride,
+                                    o1 = i1 * stride,
+                                    o2 = i2 * stride,
+                                    o3 = i3 * stride;
+
+                                double px =
+                                    (vfb.get(o0 + 0) +
+                                        vfb.get(o1 + 0) +
+                                        vfb.get(o2 + 0) +
+                                        vfb.get(o3 + 0)) *
+                                    0.25;
+                                double py =
+                                    (vfb.get(o0 + 1) +
+                                        vfb.get(o1 + 1) +
+                                        vfb.get(o2 + 1) +
+                                        vfb.get(o3 + 1)) *
+                                    0.25;
+                                double pz =
+                                    (vfb.get(o0 + 2) +
+                                        vfb.get(o1 + 2) +
+                                        vfb.get(o2 + 2) +
+                                        vfb.get(o3 + 2)) *
+                                    0.25;
+
+                                double rx = px - x;
+                                double ry = py - y;
+                                double rz = pz - z;
+                                float depth = (float) (rx * fx +
+                                    ry * fy +
+                                    rz * fz);
+
+                                ranges.add(new DR(base, 6, depth));
+                            }
+
+                            ranges.sort((a, b) -> {
+                                float da = ((DR) a).depth;
+                                float db = ((DR) b).depth;
+                                // Back-to-front (largest depth first)
+                                return Float.compare(db, da);
+                            });
+
+                            // Optional: print a brief summary
+                            if (!ranges.isEmpty()) {
+                                DR first = (DR) ranges.get(0);
+                                DR last = (DR) ranges.get(ranges.size() - 1);
+                                System.out.println(
+                                    "OffscreenWorldRenderer: TRANSLUCENT draws=" +
+                                    ranges.size() +
+                                    " depthRange=[" +
+                                    first.depth +
+                                    "," +
+                                    last.depth +
+                                    "]"
+                                );
+                            }
+
+                            for (Object o : ranges) {
+                                DR r = (DR) o;
+                                vkCmdDrawIndexed(
+                                    commandBuffer,
+                                    r.count,
+                                    1,
+                                    r.first,
+                                    0,
+                                    0
+                                );
+                            }
+                        } else {
+                            // Fallback: single unsorted draw
+                            System.out.println(
+                                "OffscreenWorldRenderer: drawIndexed TRANSLUCENT count=" +
+                                cacheEntry.translucentIndexCount
+                            );
+                            vkCmdDrawIndexed(
+                                commandBuffer,
+                                cacheEntry.translucentIndexCount,
+                                1,
+                                0,
+                                0,
+                                0
+                            );
+                        }
+                    }
+                }
             }
 
             // End render pass
@@ -2317,6 +2558,26 @@ public final class OffscreenWorldRenderer {
                     if (e.cutoutIndexMemory != 0L) vkFreeMemory(
                         device,
                         e.cutoutIndexMemory,
+                        null
+                    );
+                    if (e.translucentVertexBuffer != 0L) vkDestroyBuffer(
+                        device,
+                        e.translucentVertexBuffer,
+                        null
+                    );
+                    if (e.translucentVertexMemory != 0L) vkFreeMemory(
+                        device,
+                        e.translucentVertexMemory,
+                        null
+                    );
+                    if (e.translucentIndexBuffer != 0L) vkDestroyBuffer(
+                        device,
+                        e.translucentIndexBuffer,
+                        null
+                    );
+                    if (e.translucentIndexMemory != 0L) vkFreeMemory(
+                        device,
+                        e.translucentIndexMemory,
                         null
                     );
                 } catch (Throwable ignored) {}
@@ -2944,6 +3205,49 @@ public final class OffscreenWorldRenderer {
             }
             pipelineCutout = pPipe.get(0);
 
+            // Build TRANSLUCENT pipeline (blending ON, depth write OFF)
+            cbAttach
+                .get(0)
+                .blendEnable(true)
+                .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
+                .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                .colorBlendOp(VK_BLEND_OP_ADD)
+                .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
+                .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                .alphaBlendOp(VK_BLEND_OP_ADD);
+            ds.depthWriteEnable(false);
+            VkPipelineShaderStageCreateInfo.Buffer stagesTrans =
+                VkPipelineShaderStageCreateInfo.calloc(2, stack);
+            stagesTrans
+                .get(0)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_VERTEX_BIT)
+                .module(vertModule)
+                .pName(stack.ASCII("main"));
+            stagesTrans
+                .get(1)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
+                .module(fragModule)
+                .pName(stack.ASCII("main"));
+            gpc.get(0).pStages(stagesTrans);
+            pPipe.rewind();
+            int err4 = vkCreateGraphicsPipelines(
+                device,
+                VK_NULL_HANDLE,
+                gpc,
+                null,
+                pPipe
+            );
+            if (err4 != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkCreateGraphicsPipelines (translucent) failed: " +
+                    toVk(err4)
+                );
+                return false;
+            }
+            pipelineTranslucent = pPipe.get(0);
+
             return true;
         }
     }
@@ -2957,6 +3261,10 @@ public final class OffscreenWorldRenderer {
         if (pipelineCutout != 0L) {
             vkDestroyPipeline(device, pipelineCutout, null);
             pipelineCutout = 0L;
+        }
+        if (pipelineTranslucent != 0L) {
+            vkDestroyPipeline(device, pipelineTranslucent, null);
+            pipelineTranslucent = 0L;
         }
         if (pipelineLayout != 0L) {
             vkDestroyPipelineLayout(device, pipelineLayout, null);

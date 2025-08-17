@@ -32,10 +32,20 @@ public final class MeshBuilder {
 
         public final RegionMesh solid;
         public final RegionMesh cutout;
+        public final RegionMesh translucent;
 
         public LayeredRegionMesh(RegionMesh solid, RegionMesh cutout) {
+            this(solid, cutout, null);
+        }
+
+        public LayeredRegionMesh(
+            RegionMesh solid,
+            RegionMesh cutout,
+            RegionMesh translucent
+        ) {
             this.solid = solid;
             this.cutout = cutout;
+            this.translucent = translucent;
         }
     }
 
@@ -855,6 +865,12 @@ public final class MeshBuilder {
         );
     }
 
+    private static boolean isTranslucentKey(String k) {
+        if (k == null) return false;
+        String s = k.toLowerCase();
+        return ("water".equals(s) || "ice".equals(s) || "honey".equals(s));
+    }
+
     public LayeredRegionMesh buildRegionLayered(
         BlockAccessor acc,
         int regionChunkX,
@@ -884,6 +900,8 @@ public final class MeshBuilder {
         GrowableIntArray idxSolid = new GrowableIntArray(1 << 18);
         GrowableFloatArray vtxCutout = new GrowableFloatArray(1 << 16);
         GrowableIntArray idxCutout = new GrowableIntArray(1 << 16);
+        GrowableFloatArray vtxTranslucent = new GrowableFloatArray(1 << 16);
+        GrowableIntArray idxTranslucent = new GrowableIntArray(1 << 16);
 
         // local caches
         final float[] baseColor = new float[4];
@@ -1063,7 +1081,8 @@ public final class MeshBuilder {
                         continue;
                     }
 
-                    if (acc.isAir(x, y, z)) continue;
+                    boolean translucent = isTranslucentKey(key);
+                    if (!translucent && acc.isAir(x, y, z)) continue;
                     // Resolve UV region from the server-side texture atlas for this block key
                     ServerTextureAtlas.Region __uv =
                         ServerTextureAtlas.getInstance().getRegionForBlockKey(
@@ -1075,8 +1094,12 @@ public final class MeshBuilder {
                         v1 = __uv.v1;
 
                     boolean cutout = isCutoutKey(key);
-                    GrowableFloatArray vtx = cutout ? vtxCutout : vtxSolid;
-                    GrowableIntArray idx = cutout ? idxCutout : idxSolid;
+                    GrowableFloatArray vtx = translucent
+                        ? vtxTranslucent
+                        : (cutout ? vtxCutout : vtxSolid);
+                    GrowableIntArray idx = translucent
+                        ? idxTranslucent
+                        : (cutout ? idxCutout : idxSolid);
 
                     // North (-Z)
                     if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
@@ -1303,6 +1326,14 @@ public final class MeshBuilder {
         int[] idxSolidArr = Arrays.copyOf(idxSolid.data, idxSolid.size);
         float[] vtxCutoutArr = Arrays.copyOf(vtxCutout.data, vtxCutout.size);
         int[] idxCutoutArr = Arrays.copyOf(idxCutout.data, idxCutout.size);
+        float[] vtxTranslucentArr = Arrays.copyOf(
+            vtxTranslucent.data,
+            vtxTranslucent.size
+        );
+        int[] idxTranslucentArr = Arrays.copyOf(
+            idxTranslucent.data,
+            idxTranslucent.size
+        );
 
         RegionMesh solidMesh = RegionMesh.fromArrays(
             regionChunkX,
@@ -1322,7 +1353,16 @@ public final class MeshBuilder {
             new float[] { minXf, minYf, minZf, maxXf, maxYf, maxZf },
             version
         );
-        return new LayeredRegionMesh(solidMesh, cutoutMesh);
+        RegionMesh translucentMesh = RegionMesh.fromArrays(
+            regionChunkX,
+            regionChunkZ,
+            cfg.regionSizeChunks,
+            vtxTranslucentArr,
+            idxTranslucentArr,
+            new float[] { minXf, minYf, minZf, maxXf, maxYf, maxZf },
+            version
+        );
+        return new LayeredRegionMesh(solidMesh, cutoutMesh, translucentMesh);
     }
 
     private static int clamp(int v, int min, int max) {

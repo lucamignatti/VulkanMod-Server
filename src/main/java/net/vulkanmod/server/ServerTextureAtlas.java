@@ -626,6 +626,9 @@ public final class ServerTextureAtlas {
         m.put("dead_bush", "minecraft:block/dead_bush");
         m.put("kelp", "minecraft:block/kelp");
         m.put("torch", "minecraft:block/torch");
+        // Translucent blocks (to be routed to TRANSLUCENT layer)
+        m.put("ice", "minecraft:block/ice");
+        m.put("honey", "minecraft:block/honey_block");
 
         m.put("default", "minecraft:block/stone");
         return m;

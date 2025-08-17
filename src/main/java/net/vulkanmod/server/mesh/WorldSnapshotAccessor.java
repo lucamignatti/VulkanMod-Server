@@ -58,6 +58,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private static final byte KEY_DEAD_BUSH = 22;
     private static final byte KEY_KELP = 23;
     private static final byte KEY_TORCH = 24;
+    private static final byte KEY_ICE = 25;
+    private static final byte KEY_HONEY = 26;
 
     // Snapshot bounds in world block coordinates (min inclusive, max exclusive)
     private final int minX, minY, minZ;
@@ -88,6 +90,34 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private static volatile int[] FOLIAGE_MAP = null;
     private static volatile int MAP_W = 0,
         MAP_H = 0;
+
+    // Configurable biome tint grid step. Default 4, override via:
+    // - System property: -Dvulkanmod.tintGridStep=8
+    // - Environment variable: VULKAN_TINT_GRID_STEP=8
+    private static int getTintGridStep() {
+        final int def = 4;
+        // System property takes precedence
+        try {
+            String sp = System.getProperty("vulkanmod.tintGridStep");
+            if (sp != null && !sp.isEmpty()) {
+                int v = Integer.parseInt(sp.trim());
+                if (v < 1) v = 1;
+                if (v > 64) v = 64;
+                return v;
+            }
+        } catch (Throwable ignored) {}
+        // Fallback to environment variable
+        try {
+            String ev = System.getenv("VULKAN_TINT_GRID_STEP");
+            if (ev != null && !ev.isEmpty()) {
+                int v = Integer.parseInt(ev.trim());
+                if (v < 1) v = 1;
+                if (v > 64) v = 64;
+                return v;
+            }
+        } catch (Throwable ignored) {}
+        return def;
+    }
 
     private WorldSnapshotAccessor(
         int minX,
@@ -201,8 +231,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             key
         );
 
-        // Coarse grid step (in blocks). Keep small for reasonable fidelity; adjust later if needed.
-        final int step = 4;
+        // Coarse grid step (in blocks). Keep small for reasonable fidelity; configurable via system property/env.
+        final int step = getTintGridStep();
         final int sxTot = Math.max(0, maxX - minX);
         final int szTot = Math.max(0, maxZ - minZ);
         final int gx = Math.max(1, (sxTot + step - 1) / step);
@@ -824,6 +854,12 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         ) return KEY_WOOD;
 
         if (block == Blocks.WATER) return KEY_WATER;
+        if (
+            block == Blocks.ICE ||
+            block == Blocks.PACKED_ICE ||
+            block == Blocks.BLUE_ICE
+        ) return KEY_ICE;
+        if (block == Blocks.HONEY_BLOCK) return KEY_HONEY;
 
         // Flora / non-full blocks (billboard/cutout)
         {
@@ -889,6 +925,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             case KEY_DEAD_BUSH -> "dead_bush";
             case KEY_KELP -> "kelp";
             case KEY_TORCH -> "torch";
+            case KEY_ICE -> "ice";
+            case KEY_HONEY -> "honey";
             default -> "default";
         };
     }
@@ -972,5 +1010,24 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             "kelp".equals(s) ||
             "torch".equals(s)
         );
+    }
+
+    /**
+     * Helper to determine if the block at (x,y,z) should be emitted to the TRANSLUCENT layer.
+     * Translucent blocks: water, ice variants, honey.
+     */
+    public boolean isTranslucent(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return false;
+        byte k = key[idxLocal(x, y, z)];
+        return k == KEY_WATER || k == KEY_ICE || k == KEY_HONEY;
+    }
+
+    /**
+     * Static helper when only a block key/category name is available.
+     */
+    public static boolean isTranslucentKeyName(String name) {
+        if (name == null) return false;
+        String s = name.toLowerCase(java.util.Locale.ROOT);
+        return "water".equals(s) || "ice".equals(s) || "honey".equals(s);
     }
 }
