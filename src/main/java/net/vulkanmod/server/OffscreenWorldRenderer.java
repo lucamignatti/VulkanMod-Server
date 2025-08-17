@@ -189,8 +189,10 @@ public final class OffscreenWorldRenderer {
     // Pipeline
     private long pipelineLayout;
     private long pipeline;
+    private long pipelineCutout;
     private long vertModule;
     private long fragModule;
+    private long fragModuleCutout;
 
     // Readback image (linear tiled, host-visible)
     private long readbackImage;
@@ -232,9 +234,14 @@ public final class OffscreenWorldRenderer {
 
     private static final class RegionCacheEntry {
 
-        long vertexBuffer, vertexMemory;
-        long indexBuffer, indexMemory;
-        int indexCount;
+        long solidVertexBuffer, solidVertexMemory;
+        long solidIndexBuffer, solidIndexMemory;
+        int solidIndexCount;
+
+        long cutoutVertexBuffer, cutoutVertexMemory;
+        long cutoutIndexBuffer, cutoutIndexMemory;
+        int cutoutIndexCount;
+
         long version;
         long lastUsedNanos;
     }
@@ -1018,7 +1025,10 @@ public final class OffscreenWorldRenderer {
                 );
             }
         }
-        RegionMesh regionMesh = null;
+
+        // Build layered meshes: SOLID + CUTOUT
+        RegionMesh solidMesh = null;
+        RegionMesh cutoutMesh = null;
         int regionSizeChunks = Math.max(2, Math.min(renderDistance, 16));
         try {
             if (world != null) {
@@ -1033,15 +1043,16 @@ public final class OffscreenWorldRenderer {
                 int minY = world.getMinBuildHeight();
                 int maxY = world.getMaxBuildHeight();
 
-                // Build snapshot on the server thread; do not force-load chunks (avoid stalling main thread)
-                java.util.concurrent.CompletableFuture<RegionMesh> buildFuture =
-                    new java.util.concurrent.CompletableFuture<>();
+                // Build snapshot and meshes on the server thread; do not stall main thread with world calls off-thread
+                java.util.concurrent.CompletableFuture<
+                    MeshBuilder.LayeredRegionMesh
+                > buildFuture = new java.util.concurrent.CompletableFuture<>();
                 final net.minecraft.server.level.ServerLevel worldFinal = world;
                 net.minecraft.server.MinecraftServer msLocal =
                     worldFinal.getServer();
                 msLocal.execute(() -> {
                     try {
-                        // Force-load chunks synchronously on the server thread
+                        // Ensure chunks are loaded
                         for (
                             int cz = regionChunkZ;
                             cz < regionChunkZ + regionSizeChunks;
@@ -1057,7 +1068,6 @@ public final class OffscreenWorldRenderer {
                                 } catch (Throwable ignore) {}
                             }
                         }
-                        // Proceed to snapshot after ensuring chunks are loaded
                         WorldSnapshotAccessor snap =
                             WorldSnapshotAccessor.capture(
                                 worldFinal,
@@ -1074,9 +1084,9 @@ public final class OffscreenWorldRenderer {
                         cfg.minY = minY;
                         cfg.maxY = maxY;
                         MeshBuilder builder = new MeshBuilder(cfg);
-                        long version = 1L; // simple version for now
+                        long version = 1L;
                         buildFuture.complete(
-                            builder.buildRegion(
+                            builder.buildRegionLayered(
                                 snap,
                                 regionChunkX,
                                 regionChunkZ,
@@ -1088,117 +1098,180 @@ public final class OffscreenWorldRenderer {
                     }
                 });
                 try {
-                    regionMesh = buildFuture.get();
+                    MeshBuilder.LayeredRegionMesh layered = buildFuture.get();
+                    if (layered != null) {
+                        solidMesh = layered.solid;
+                        cutoutMesh = layered.cutout;
+                    }
                 } catch (Throwable t) {
                     System.err.println(
-                        "OffscreenWorldRenderer: server-thread snapshot/mesh failed: " +
+                        "OffscreenWorldRenderer: server-thread layered snapshot/mesh failed: " +
                         t
                     );
-                    regionMesh = null;
+                    solidMesh = null;
+                    cutoutMesh = null;
                 }
             }
         } catch (Throwable t) {
             System.err.println(
-                "OffscreenWorldRenderer: buildRegion failed: " + t
+                "OffscreenWorldRenderer: buildRegionLayered failed: " + t
             );
-            regionMesh = null;
+            solidMesh = null;
+            cutoutMesh = null;
         }
 
+        // Upload/update GPU buffers per-layer
         RegionCacheEntry cacheEntry = null;
         try {
-            if (regionMesh != null && !regionMesh.isEmpty()) {
+            // Key by solid mesh identity (region coords/size are identical for both)
+            RegionMesh refMesh = solidMesh != null ? solidMesh : cutoutMesh;
+            if (refMesh != null && !refMesh.isEmpty()) {
                 RegionKey key = new RegionKey(
-                    regionMesh.getRegionChunkX(),
-                    regionMesh.getRegionChunkZ(),
-                    regionMesh.getRegionSizeChunks()
+                    refMesh.getRegionChunkX(),
+                    refMesh.getRegionChunkZ(),
+                    refMesh.getRegionSizeChunks()
                 );
                 RegionCacheEntry existing = regionCache.get(key);
 
                 boolean needsUpload =
                     existing == null ||
-                    existing.version != regionMesh.getVersion() ||
-                    existing.indexCount != regionMesh.getIndexCount();
+                    existing.version != refMesh.getVersion();
 
                 if (needsUpload) {
                     // Free previous
                     if (existing != null) {
-                        if (existing.vertexBuffer != 0L) vkDestroyBuffer(
+                        if (existing.solidVertexBuffer != 0L) vkDestroyBuffer(
                             device,
-                            existing.vertexBuffer,
+                            existing.solidVertexBuffer,
                             null
                         );
-                        if (existing.vertexMemory != 0L) vkFreeMemory(
+                        if (existing.solidVertexMemory != 0L) vkFreeMemory(
                             device,
-                            existing.vertexMemory,
+                            existing.solidVertexMemory,
                             null
                         );
-                        if (existing.indexBuffer != 0L) vkDestroyBuffer(
+                        if (existing.solidIndexBuffer != 0L) vkDestroyBuffer(
                             device,
-                            existing.indexBuffer,
+                            existing.solidIndexBuffer,
                             null
                         );
-                        if (existing.indexMemory != 0L) vkFreeMemory(
+                        if (existing.solidIndexMemory != 0L) vkFreeMemory(
                             device,
-                            existing.indexMemory,
+                            existing.solidIndexMemory,
                             null
                         );
-                    }
 
-                    // Create device-local buffers
-                    int vtxBytes = regionMesh.getVertexBufferSizeBytes();
-                    int idxBytes = regionMesh.getIndexBufferSizeBytes();
-
-                    BufferAlloc vbo = createBuffer(
-                        vtxBytes,
-                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-                    );
-                    BufferAlloc ibo = createBuffer(
-                        idxBytes,
-                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-                    );
-
-                    if (vbo == null || ibo == null) return null;
-
-                    // Upload via staging
-                    FloatBuffer vfb = regionMesh.getInterleavedVertices();
-                    IntBuffer ifb = regionMesh.getIndices();
-                    ByteBuffer vSrc = MemoryUtil.memByteBuffer(
-                        MemoryUtil.memAddress(vfb),
-                        vtxBytes
-                    );
-                    ByteBuffer iSrc = MemoryUtil.memByteBuffer(
-                        MemoryUtil.memAddress(ifb),
-                        idxBytes
-                    );
-
-                    if (!uploadBuffer(vbo.buffer, vSrc)) {
-                        System.err.println(
-                            "OffscreenWorldRenderer: uploadBuffer for vertex buffer failed (bytes=" +
-                            vtxBytes +
-                            ")"
+                        if (existing.cutoutVertexBuffer != 0L) vkDestroyBuffer(
+                            device,
+                            existing.cutoutVertexBuffer,
+                            null
                         );
-                        return null;
-                    }
-                    if (!uploadBuffer(ibo.buffer, iSrc)) {
-                        System.err.println(
-                            "OffscreenWorldRenderer: uploadBuffer for index buffer failed (bytes=" +
-                            idxBytes +
-                            ")"
+                        if (existing.cutoutVertexMemory != 0L) vkFreeMemory(
+                            device,
+                            existing.cutoutVertexMemory,
+                            null
                         );
-                        return null;
+                        if (existing.cutoutIndexBuffer != 0L) vkDestroyBuffer(
+                            device,
+                            existing.cutoutIndexBuffer,
+                            null
+                        );
+                        if (existing.cutoutIndexMemory != 0L) vkFreeMemory(
+                            device,
+                            existing.cutoutIndexMemory,
+                            null
+                        );
                     }
 
                     RegionCacheEntry e = new RegionCacheEntry();
-                    e.vertexBuffer = vbo.buffer;
-                    e.vertexMemory = vbo.memory;
-                    e.indexBuffer = ibo.buffer;
-                    e.indexMemory = ibo.memory;
-                    e.indexCount = regionMesh.getIndexCount();
-                    e.version = regionMesh.getVersion();
+
+                    // Upload SOLID
+                    if (solidMesh != null && !solidMesh.isEmpty()) {
+                        int vtxBytesS = solidMesh.getVertexBufferSizeBytes();
+                        int idxBytesS = solidMesh.getIndexBufferSizeBytes();
+                        BufferAlloc vboS = createBuffer(
+                            vtxBytesS,
+                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        BufferAlloc iboS = createBuffer(
+                            idxBytesS,
+                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        if (vboS != null && iboS != null) {
+                            FloatBuffer vfb =
+                                solidMesh.getInterleavedVertices();
+                            IntBuffer ifb = solidMesh.getIndices();
+                            ByteBuffer vSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(vfb),
+                                vtxBytesS
+                            );
+                            ByteBuffer iSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(ifb),
+                                idxBytesS
+                            );
+                            if (!uploadBuffer(vboS.buffer, vSrc)) return null;
+                            if (!uploadBuffer(iboS.buffer, iSrc)) return null;
+
+                            e.solidVertexBuffer = vboS.buffer;
+                            e.solidVertexMemory = vboS.memory;
+                            e.solidIndexBuffer = iboS.buffer;
+                            e.solidIndexMemory = iboS.memory;
+                            e.solidIndexCount = solidMesh.getIndexCount();
+                        }
+                    } else {
+                        e.solidVertexBuffer = 0L;
+                        e.solidIndexBuffer = 0L;
+                        e.solidIndexCount = 0;
+                    }
+
+                    // Upload CUTOUT
+                    if (cutoutMesh != null && !cutoutMesh.isEmpty()) {
+                        int vtxBytesC = cutoutMesh.getVertexBufferSizeBytes();
+                        int idxBytesC = cutoutMesh.getIndexBufferSizeBytes();
+                        BufferAlloc vboC = createBuffer(
+                            vtxBytesC,
+                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        BufferAlloc iboC = createBuffer(
+                            idxBytesC,
+                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        if (vboC != null && iboC != null) {
+                            FloatBuffer vfb =
+                                cutoutMesh.getInterleavedVertices();
+                            IntBuffer ifb = cutoutMesh.getIndices();
+                            ByteBuffer vSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(vfb),
+                                vtxBytesC
+                            );
+                            ByteBuffer iSrc = MemoryUtil.memByteBuffer(
+                                MemoryUtil.memAddress(ifb),
+                                idxBytesC
+                            );
+                            if (!uploadBuffer(vboC.buffer, vSrc)) return null;
+                            if (!uploadBuffer(iboC.buffer, iSrc)) return null;
+
+                            e.cutoutVertexBuffer = vboC.buffer;
+                            e.cutoutVertexMemory = vboC.memory;
+                            e.cutoutIndexBuffer = iboC.buffer;
+                            e.cutoutIndexMemory = iboC.memory;
+                            e.cutoutIndexCount = cutoutMesh.getIndexCount();
+                        }
+                    } else {
+                        e.cutoutVertexBuffer = 0L;
+                        e.cutoutIndexBuffer = 0L;
+                        e.cutoutIndexCount = 0;
+                    }
+
+                    e.version = refMesh.getVersion();
                     e.lastUsedNanos = System.nanoTime();
                     regionCache.put(key, e);
                     cacheEntry = e;
@@ -1209,13 +1282,18 @@ public final class OffscreenWorldRenderer {
             }
         } catch (Throwable t) {
             System.err.println(
-                "OffscreenWorldRenderer: region GPU upload/cache failed: " + t
+                "OffscreenWorldRenderer: region GPU upload/cache (layered) failed: " +
+                t
             );
             cacheEntry = null;
         }
 
-        // If we have no uploaded region buffers, we will render a cleared frame (no draw)
-        if (cacheEntry == null || cacheEntry.indexCount <= 0) {
+        // If we have no uploaded region buffers in either layer, we will render a cleared frame (no draw)
+        if (
+            cacheEntry == null ||
+            (cacheEntry.solidIndexCount <= 0 &&
+                cacheEntry.cutoutIndexCount <= 0)
+        ) {
             System.out.println(
                 "OffscreenWorldRenderer: no region mesh/buffers available — returning cleared frame (no draw)"
             );
@@ -1318,20 +1396,9 @@ public final class OffscreenWorldRenderer {
             scissors.get(0).extent().set(width, height);
             vkCmdSetScissor(commandBuffer, 0, scissors);
 
-            // Bind pipeline moved into draw block when descriptor set is ready
-
             // If we have a mesh/cache entry and atlas descriptor ready, bind buffers and draw indexed
-            if (
-                cacheEntry != null &&
-                cacheEntry.indexCount > 0 &&
-                descriptorSet != 0L
-            ) {
-                vkCmdBindPipeline(
-                    commandBuffer,
-                    VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipeline
-                );
-                // Push MVP
+            if (cacheEntry != null && descriptorSet != 0L) {
+                // Push MVP (shared)
                 float[] mvp = computeMVP(
                     x,
                     y,
@@ -1344,87 +1411,8 @@ public final class OffscreenWorldRenderer {
                     0.1f,
                     512.0f
                 );
-                // Diagnostic: compute camera basis and roll (expected ~0 deg when pitch != +/-90 and no roll)
-                if (LOG_CAMERA_BASIS) {
-                    float yawR = (float) Math.toRadians(yaw);
-                    float pitchR = (float) Math.toRadians(pitch);
-                    float cp = (float) Math.cos(pitchR);
-                    float sp = (float) Math.sin(pitchR);
-                    float cy = (float) Math.cos(yawR);
-                    float sy = (float) Math.sin(yawR);
-
-                    // Forward (same convention as computeMVP)
-                    float fx = -sy * cp;
-                    float fy = sp;
-                    float fz = cy * cp;
-
-                    // World up
-                    float wux = 0f,
-                        wuy = 1f,
-                        wuz = 0f;
-
-                    // Right = normalize(worldUp x forward)
-                    float rx = wuy * fz - wuz * fy;
-                    float ry = wuz * fx - wux * fz;
-                    float rz = wux * fy - wuy * fx;
-                    float rl = (float) Math.sqrt(rx * rx + ry * ry + rz * rz);
-                    if (rl > 0f) {
-                        rx /= rl;
-                        ry /= rl;
-                        rz /= rl;
-                    }
-
-                    // Up = normalize(forward x right)
-                    float ux = fy * rz - fz * ry;
-                    float uy = fz * rx - fx * rz;
-                    float uz = fx * ry - fy * rx;
-                    float ul = (float) Math.sqrt(ux * ux + uy * uy + uz * uz);
-                    if (ul > 0f) {
-                        ux /= ul;
-                        uy /= ul;
-                        uz /= ul;
-                    }
-
-                    // Project worldUp onto camera plane (orthogonal to forward)
-                    float dotwf = wux * fx + wuy * fy + wuz * fz;
-                    float px = wux - dotwf * fx;
-                    float py = wuy - dotwf * fy;
-                    float pz = wuz - dotwf * fz;
-                    float pl = (float) Math.sqrt(px * px + py * py + pz * pz);
-                    if (pl > 0f) {
-                        px /= pl;
-                        py /= pl;
-                        pz /= pl;
-                    }
-
-                    // Roll is the angle from camera up to projected worldUp around forward
-                    float rollRad = (float) Math.atan2(
-                        rx * px + ry * py + rz * pz,
-                        ux * px + uy * py + uz * pz
-                    );
-                    float rollDeg = rollRad * 57.29578f;
-
-                    System.out.println(
-                        String.format(
-                            java.util.Locale.ROOT,
-                            "OffscreenWorldRenderer: basis f=(%.3f,%.3f,%.3f) r=(%.3f,%.3f,%.3f) u=(%.3f,%.3f,%.3f) roll=%.2fdeg",
-                            fx,
-                            fy,
-                            fz,
-                            rx,
-                            ry,
-                            rz,
-                            ux,
-                            uy,
-                            uz,
-                            rollDeg
-                        )
-                    );
-                }
-
                 ByteBuffer pc = stack.malloc(64);
                 if (TRANSPOSE_MVP_FOR_SHADER) {
-                    // Transpose MVP before pushing (useful if shader interprets as row-major)
                     float[] mt = new float[16];
                     for (int r = 0; r < 4; r++) {
                         for (int c = 0; c < 4; c++) {
@@ -1436,54 +1424,94 @@ public final class OffscreenWorldRenderer {
                     for (int i = 0; i < 16; i++) pc.putFloat(mvp[i]);
                 }
                 pc.flip();
-                vkCmdPushConstants(
-                    commandBuffer,
-                    pipelineLayout,
-                    VK_SHADER_STAGE_VERTEX_BIT,
-                    0,
-                    pc
-                );
 
                 // Bind atlas descriptor set
-                if (descriptorSet != 0L) {
-                    vkCmdBindDescriptorSets(
+                vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipelineLayout,
+                    0,
+                    stack.longs(descriptorSet),
+                    null
+                );
+
+                // Draw SOLID
+                if (cacheEntry.solidIndexCount > 0 && pipeline != 0L) {
+                    vkCmdBindPipeline(
                         commandBuffer,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipeline
+                    );
+                    vkCmdPushConstants(
+                        commandBuffer,
                         pipelineLayout,
+                        VK_SHADER_STAGE_VERTEX_BIT,
                         0,
-                        stack.longs(descriptorSet),
-                        null
+                        pc
+                    );
+                    LongBuffer pVBs = stack.mallocLong(1);
+                    pVBs.put(0, cacheEntry.solidVertexBuffer);
+                    LongBuffer pOffs = stack.mallocLong(1);
+                    pOffs.put(0, 0L);
+                    vkCmdBindVertexBuffers(commandBuffer, 0, pVBs, pOffs);
+                    vkCmdBindIndexBuffer(
+                        commandBuffer,
+                        cacheEntry.solidIndexBuffer,
+                        0L,
+                        VK_INDEX_TYPE_UINT32
+                    );
+                    System.out.println(
+                        "OffscreenWorldRenderer: drawIndexed SOLID count=" +
+                        cacheEntry.solidIndexCount
+                    );
+                    vkCmdDrawIndexed(
+                        commandBuffer,
+                        cacheEntry.solidIndexCount,
+                        1,
+                        0,
+                        0,
+                        0
                     );
                 }
 
-                // Bind vertex buffer
-                LongBuffer pVB = stack.mallocLong(1);
-                pVB.put(0, cacheEntry.vertexBuffer);
-                LongBuffer pOffsets = stack.mallocLong(1);
-                pOffsets.put(0, 0L);
-                vkCmdBindVertexBuffers(commandBuffer, 0, pVB, pOffsets);
-
-                // Bind index buffer
-                vkCmdBindIndexBuffer(
-                    commandBuffer,
-                    cacheEntry.indexBuffer,
-                    0L,
-                    VK_INDEX_TYPE_UINT32
-                );
-
-                // Draw
-                System.out.println(
-                    "OffscreenWorldRenderer: drawIndexed count=" +
-                    cacheEntry.indexCount
-                );
-                vkCmdDrawIndexed(
-                    commandBuffer,
-                    cacheEntry.indexCount,
-                    1,
-                    0,
-                    0,
-                    0
-                );
+                // Draw CUTOUT
+                if (cacheEntry.cutoutIndexCount > 0 && pipelineCutout != 0L) {
+                    vkCmdBindPipeline(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineCutout
+                    );
+                    vkCmdPushConstants(
+                        commandBuffer,
+                        pipelineLayout,
+                        VK_SHADER_STAGE_VERTEX_BIT,
+                        0,
+                        pc
+                    );
+                    LongBuffer pVBc = stack.mallocLong(1);
+                    pVBc.put(0, cacheEntry.cutoutVertexBuffer);
+                    LongBuffer pOffc = stack.mallocLong(1);
+                    pOffc.put(0, 0L);
+                    vkCmdBindVertexBuffers(commandBuffer, 0, pVBc, pOffc);
+                    vkCmdBindIndexBuffer(
+                        commandBuffer,
+                        cacheEntry.cutoutIndexBuffer,
+                        0L,
+                        VK_INDEX_TYPE_UINT32
+                    );
+                    System.out.println(
+                        "OffscreenWorldRenderer: drawIndexed CUTOUT count=" +
+                        cacheEntry.cutoutIndexCount
+                    );
+                    vkCmdDrawIndexed(
+                        commandBuffer,
+                        cacheEntry.cutoutIndexCount,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+                }
             }
 
             // End render pass
@@ -1613,24 +1641,45 @@ public final class OffscreenWorldRenderer {
             // Cleanup region cache GPU buffers
             for (RegionCacheEntry e : regionCache.values()) {
                 try {
-                    if (e.vertexBuffer != 0L) vkDestroyBuffer(
+                    if (e.solidVertexBuffer != 0L) vkDestroyBuffer(
                         device,
-                        e.vertexBuffer,
+                        e.solidVertexBuffer,
                         null
                     );
-                    if (e.vertexMemory != 0L) vkFreeMemory(
+                    if (e.solidVertexMemory != 0L) vkFreeMemory(
                         device,
-                        e.vertexMemory,
+                        e.solidVertexMemory,
                         null
                     );
-                    if (e.indexBuffer != 0L) vkDestroyBuffer(
+                    if (e.solidIndexBuffer != 0L) vkDestroyBuffer(
                         device,
-                        e.indexBuffer,
+                        e.solidIndexBuffer,
                         null
                     );
-                    if (e.indexMemory != 0L) vkFreeMemory(
+                    if (e.solidIndexMemory != 0L) vkFreeMemory(
                         device,
-                        e.indexMemory,
+                        e.solidIndexMemory,
+                        null
+                    );
+
+                    if (e.cutoutVertexBuffer != 0L) vkDestroyBuffer(
+                        device,
+                        e.cutoutVertexBuffer,
+                        null
+                    );
+                    if (e.cutoutVertexMemory != 0L) vkFreeMemory(
+                        device,
+                        e.cutoutVertexMemory,
+                        null
+                    );
+                    if (e.cutoutIndexBuffer != 0L) vkDestroyBuffer(
+                        device,
+                        e.cutoutIndexBuffer,
+                        null
+                    );
+                    if (e.cutoutIndexMemory != 0L) vkFreeMemory(
+                        device,
+                        e.cutoutIndexMemory,
                         null
                     );
                 } catch (Throwable ignored) {}
@@ -1891,7 +1940,7 @@ public final class OffscreenWorldRenderer {
 
     private boolean createPipeline() {
         try (MemoryStack stack = stackPush()) {
-            // Mesh shaders: vertex consumes interleaved attributes, transforms by MVP push constant; fragment outputs color
+            // Mesh shaders: vertex consumes interleaved attributes, transforms by MVP push constant
             String vertGLSL =
                 "#version 450\n" +
                 "layout(location=0) in vec3 inPos;\n" +
@@ -1907,7 +1956,8 @@ public final class OffscreenWorldRenderer {
                 "  vUV = inUV;\n" +
                 "}\n";
 
-            String fragGLSL =
+            // SOLID fragment shader (no discard)
+            String fragGLSLSolid =
                 "#version 450\n" +
                 "layout(set=0, binding=0) uniform sampler2D uAtlas;\n" +
                 "layout(location=0) in vec4 vColor;\n" +
@@ -1918,19 +1968,28 @@ public final class OffscreenWorldRenderer {
                 "  outColor = vColor * texel;\n" +
                 "}\n";
 
+            // CUTOUT fragment shader (alpha discard)
+            String fragGLSLCutout =
+                "#version 450\n" +
+                "layout(set=0, binding=0) uniform sampler2D uAtlas;\n" +
+                "layout(location=0) in vec4 vColor;\n" +
+                "layout(location=1) in vec2 vUV;\n" +
+                "layout(location=0) out vec4 outColor;\n" +
+                "void main(){\n" +
+                "  vec4 texel = texture(uAtlas, vUV);\n" +
+                "  if (texel.a < 0.5) discard;\n" +
+                "  outColor = vColor * texel;\n" +
+                "}\n";
+
             ByteBuffer vertSpv = compileGLSL(vertGLSL, true);
-            if (vertSpv == null) {
+            ByteBuffer fragSpvSolid = compileGLSL(fragGLSLSolid, false);
+            ByteBuffer fragSpvCutout = compileGLSL(fragGLSLCutout, false);
+            if (
+                vertSpv == null || fragSpvSolid == null || fragSpvCutout == null
+            ) {
                 System.err.println(
-                    "OffscreenWorldRenderer: vertex shader compile failed."
+                    "OffscreenWorldRenderer: shader compile failed."
                 );
-            }
-            ByteBuffer fragSpv = compileGLSL(fragGLSL, false);
-            if (fragSpv == null) {
-                System.err.println(
-                    "OffscreenWorldRenderer: fragment shader compile failed."
-                );
-            }
-            if (vertSpv == null || fragSpv == null) {
                 return false;
             }
 
@@ -1951,17 +2010,29 @@ public final class OffscreenWorldRenderer {
             }
             vertModule = pShader.get(0);
 
-            smci.pCode(fragSpv);
+            smci.pCode(fragSpvSolid);
             pShader.rewind();
             err = vkCreateShaderModule(device, smci, null, pShader);
             if (err != VK_SUCCESS) {
                 System.err.println(
-                    "OffscreenWorldRenderer: vkCreateShaderModule (frag) failed: " +
+                    "OffscreenWorldRenderer: vkCreateShaderModule (frag solid) failed: " +
                     toVk(err)
                 );
                 return false;
             }
             fragModule = pShader.get(0);
+
+            smci.pCode(fragSpvCutout);
+            pShader.rewind();
+            err = vkCreateShaderModule(device, smci, null, pShader);
+            if (err != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkCreateShaderModule (frag cutout) failed: " +
+                    toVk(err)
+                );
+                return false;
+            }
+            fragModuleCutout = pShader.get(0);
 
             // Descriptor set layout for combined image sampler (atlas)
             LongBuffer pSetLayout = stack.mallocLong(1);
@@ -2015,23 +2086,7 @@ public final class OffscreenWorldRenderer {
             }
             pipelineLayout = pPL.get(0);
 
-            // Shader stages
-            VkPipelineShaderStageCreateInfo.Buffer stages =
-                VkPipelineShaderStageCreateInfo.calloc(2, stack);
-            stages
-                .get(0)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_VERTEX_BIT)
-                .module(vertModule)
-                .pName(stack.ASCII("main"));
-            stages
-                .get(1)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
-                .module(fragModule)
-                .pName(stack.ASCII("main"));
-
-            // Vertex input for interleaved attributes: pos3 (0), normal3 (1), color4 (2)
+            // Vertex input for interleaved attributes: pos3 (0), normal3 (1), color4 (2), uv2 (3)
             VkVertexInputBindingDescription.Buffer bindings =
                 VkVertexInputBindingDescription.calloc(1, stack);
             bindings
@@ -2166,12 +2221,12 @@ public final class OffscreenWorldRenderer {
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
                     .pDynamicStates(dynamics);
 
+            // Common pipeline create info holder
             VkGraphicsPipelineCreateInfo.Buffer gpc =
                 VkGraphicsPipelineCreateInfo.calloc(1, stack);
             gpc
                 .get(0)
                 .sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
-                .pStages(stages)
                 .pVertexInputState(vi)
                 .pInputAssemblyState(ia)
                 .pViewportState(vpState)
@@ -2184,6 +2239,23 @@ public final class OffscreenWorldRenderer {
                 .renderPass(renderPass)
                 .subpass(0);
 
+            // Build SOLID pipeline
+            VkPipelineShaderStageCreateInfo.Buffer stagesSolid =
+                VkPipelineShaderStageCreateInfo.calloc(2, stack);
+            stagesSolid
+                .get(0)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_VERTEX_BIT)
+                .module(vertModule)
+                .pName(stack.ASCII("main"));
+            stagesSolid
+                .get(1)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
+                .module(fragModule)
+                .pName(stack.ASCII("main"));
+            gpc.get(0).pStages(stagesSolid);
+
             LongBuffer pPipe = stack.mallocLong(1);
             int err2 = vkCreateGraphicsPipelines(
                 device,
@@ -2194,12 +2266,45 @@ public final class OffscreenWorldRenderer {
             );
             if (err2 != VK_SUCCESS) {
                 System.err.println(
-                    "OffscreenWorldRenderer: vkCreateGraphicsPipelines failed: " +
+                    "OffscreenWorldRenderer: vkCreateGraphicsPipelines (solid) failed: " +
                     toVk(err2)
                 );
                 return false;
             }
             pipeline = pPipe.get(0);
+
+            // Build CUTOUT pipeline (alpha discard shader)
+            VkPipelineShaderStageCreateInfo.Buffer stagesCutout =
+                VkPipelineShaderStageCreateInfo.calloc(2, stack);
+            stagesCutout
+                .get(0)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_VERTEX_BIT)
+                .module(vertModule)
+                .pName(stack.ASCII("main"));
+            stagesCutout
+                .get(1)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
+                .module(fragModuleCutout)
+                .pName(stack.ASCII("main"));
+            gpc.get(0).pStages(stagesCutout);
+            pPipe.rewind();
+            int err3 = vkCreateGraphicsPipelines(
+                device,
+                VK_NULL_HANDLE,
+                gpc,
+                null,
+                pPipe
+            );
+            if (err3 != VK_SUCCESS) {
+                System.err.println(
+                    "OffscreenWorldRenderer: vkCreateGraphicsPipelines (cutout) failed: " +
+                    toVk(err3)
+                );
+                return false;
+            }
+            pipelineCutout = pPipe.get(0);
 
             return true;
         }
@@ -2210,6 +2315,10 @@ public final class OffscreenWorldRenderer {
         if (pipeline != 0L) {
             vkDestroyPipeline(device, pipeline, null);
             pipeline = 0L;
+        }
+        if (pipelineCutout != 0L) {
+            vkDestroyPipeline(device, pipelineCutout, null);
+            pipelineCutout = 0L;
         }
         if (pipelineLayout != 0L) {
             vkDestroyPipelineLayout(device, pipelineLayout, null);
@@ -2222,6 +2331,10 @@ public final class OffscreenWorldRenderer {
         if (fragModule != 0L) {
             vkDestroyShaderModule(device, fragModule, null);
             fragModule = 0L;
+        }
+        if (fragModuleCutout != 0L) {
+            vkDestroyShaderModule(device, fragModuleCutout, null);
+            fragModuleCutout = 0L;
         }
     }
 

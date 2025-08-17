@@ -445,4 +445,24 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             ")]"
         );
     }
+
+    /**
+     * Helper to determine if the block at (x,y,z) should be emitted into the CUTOUT layer.
+     * This uses the internal lightweight classification to avoid any client-only dependencies.
+     */
+    public boolean isCutout(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return false;
+        byte k = key[idxLocal(x, y, z)];
+        return k == KEY_LEAVES || k == KEY_GLASS;
+    }
+
+    /**
+     * Static helper for code that only has a block key/category name.
+     * Returns true for categories that should go to the CUTOUT layer.
+     */
+    public static boolean isCutoutKeyName(String name) {
+        if (name == null) return false;
+        String s = name.toLowerCase(java.util.Locale.ROOT);
+        return "leaves".equals(s) || "glass".equals(s);
+    }
 }

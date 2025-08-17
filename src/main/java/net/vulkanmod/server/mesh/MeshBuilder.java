@@ -23,6 +23,22 @@ import net.vulkanmod.server.ServerTextureAtlas;
  */
 public final class MeshBuilder {
 
+    public enum RenderLayer {
+        SOLID,
+        CUTOUT,
+    }
+
+    public static final class LayeredRegionMesh {
+
+        public final RegionMesh solid;
+        public final RegionMesh cutout;
+
+        public LayeredRegionMesh(RegionMesh solid, RegionMesh cutout) {
+            this.solid = solid;
+            this.cutout = cutout;
+        }
+    }
+
     public interface BlockAccessor {
         // True if the block at (x,y,z) is air (non-solid transparent)
         boolean isAir(int x, int y, int z);
@@ -533,6 +549,261 @@ public final class MeshBuilder {
     private static String safeKey(String k) {
         if (k == null || k.isEmpty()) return "default";
         return k.toLowerCase();
+    }
+
+    private static boolean isCutoutKey(String k) {
+        if (k == null) return false;
+        String s = k.toLowerCase();
+        return "leaves".equals(s) || "glass".equals(s);
+    }
+
+    public LayeredRegionMesh buildRegionLayered(
+        BlockAccessor acc,
+        int regionChunkX,
+        int regionChunkZ,
+        long version
+    ) {
+        int cs = cfg.chunkSizeBlocks;
+        int side = cfg.regionSizeChunks * cs;
+
+        final int startX = regionChunkX * cs;
+        final int startZ = regionChunkZ * cs;
+        final int endX = startX + side; // exclusive
+        final int endZ = startZ + side; // exclusive
+
+        final int minY = clamp(cfg.minY, acc.getMinY(), acc.getMaxY());
+        final int maxY = clamp(cfg.maxY, acc.getMinY(), acc.getMaxY());
+
+        // AABB in world coordinates for this region
+        float minXf = startX;
+        float minYf = minY;
+        float minZf = startZ;
+        float maxXf = endX;
+        float maxYf = maxY;
+        float maxZf = endZ;
+
+        GrowableFloatArray vtxSolid = new GrowableFloatArray(1 << 18);
+        GrowableIntArray idxSolid = new GrowableIntArray(1 << 18);
+        GrowableFloatArray vtxCutout = new GrowableFloatArray(1 << 16);
+        GrowableIntArray idxCutout = new GrowableIntArray(1 << 16);
+
+        // local caches
+        final float[] baseColor = new float[4];
+        final float[] faceColor = new float[4];
+        final float[] nrm = new float[3];
+
+        // Loop through blocks and emit faces when neighbor is air.
+        for (int y = minY; y < maxY; y++) {
+            for (int z = startZ; z < endZ; z++) {
+                for (int x = startX; x < endX; x++) {
+                    if (acc.isAir(x, y, z)) continue;
+
+                    String key = safeKey(acc.getBlockKey(x, y, z));
+                    float[] lutColor = cfg.colorLUT.getOrDefault(
+                        key,
+                        cfg.defaultColor
+                    );
+                    System.arraycopy(lutColor, 0, baseColor, 0, 4);
+
+                    // Resolve UV region from the server-side texture atlas for this block key
+                    ServerTextureAtlas.Region __uv =
+                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
+                            key
+                        );
+                    float u0 = __uv.u0,
+                        v0 = __uv.v0,
+                        u1 = __uv.u1,
+                        v1 = __uv.v1;
+
+                    boolean cutout = isCutoutKey(key);
+                    GrowableFloatArray vtx = cutout ? vtxCutout : vtxSolid;
+                    GrowableIntArray idx = cutout ? idxCutout : idxSolid;
+
+                    // North (-Z)
+                    if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
+                        set3(nrm, 0, 0, -1);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_NZ,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                    // South (+Z)
+                    if (isAirOrOOB(acc, x, y, z + 1, minY, maxY)) {
+                        set3(nrm, 0, 0, 1);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_PZ,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                    // West (-X)
+                    if (isAirOrOOB(acc, x - 1, y, z, minY, maxY)) {
+                        set3(nrm, -1, 0, 0);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_NX,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                    // East (+X)
+                    if (isAirOrOOB(acc, x + 1, y, z, minY, maxY)) {
+                        set3(nrm, 1, 0, 0);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_PX,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                    // Top (+Y)
+                    if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
+                        set3(nrm, 0, 1, 0);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_PY,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                    // Bottom (-Y)
+                    if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
+                        set3(nrm, 0, -1, 0);
+                        emitFaceQuad(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            FACE_NY,
+                            nrm,
+                            applyLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            ),
+                            u0,
+                            v0,
+                            u1,
+                            v1
+                        );
+                    }
+                }
+            }
+        }
+
+        // Pack into arrays
+        float[] vtxSolidArr = Arrays.copyOf(vtxSolid.data, vtxSolid.size);
+        int[] idxSolidArr = Arrays.copyOf(idxSolid.data, idxSolid.size);
+        float[] vtxCutoutArr = Arrays.copyOf(vtxCutout.data, vtxCutout.size);
+        int[] idxCutoutArr = Arrays.copyOf(idxCutout.data, idxCutout.size);
+
+        RegionMesh solidMesh = RegionMesh.fromArrays(
+            regionChunkX,
+            regionChunkZ,
+            cfg.regionSizeChunks,
+            vtxSolidArr,
+            idxSolidArr,
+            new float[] { minXf, minYf, minZf, maxXf, maxYf, maxZf },
+            version
+        );
+        RegionMesh cutoutMesh = RegionMesh.fromArrays(
+            regionChunkX,
+            regionChunkZ,
+            cfg.regionSizeChunks,
+            vtxCutoutArr,
+            idxCutoutArr,
+            new float[] { minXf, minYf, minZf, maxXf, maxYf, maxZf },
+            version
+        );
+        return new LayeredRegionMesh(solidMesh, cutoutMesh);
     }
 
     private static int clamp(int v, int min, int max) {
