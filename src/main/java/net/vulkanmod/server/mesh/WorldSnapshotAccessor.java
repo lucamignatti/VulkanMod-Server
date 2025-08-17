@@ -321,6 +321,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                     Holder<Biome> h = world.getBiome(pos);
                     Biome biome = h.value();
                     BiomeSpecialEffects fx = biome.getSpecialEffects();
+                    // Water tint from biome special effects (server-only safe)
+                    wcol = fx.getWaterColor();
 
                     // Reflective temperature read for mapping compatibility
                     try {
@@ -705,15 +707,8 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         // Water and other fluids should not occlude blocks in our basic meshing
         if (block == Blocks.WATER || block == Blocks.BUBBLE_COLUMN) return true;
 
-        // Glass/stained glass are transparent; treat as air for face visibility in this simple phase
-        if (
-            block == Blocks.GLASS ||
-            block == Blocks.TINTED_GLASS ||
-            block instanceof StainedGlassBlock ||
-            block instanceof StainedGlassPaneBlock
-        ) {
-            return true;
-        }
+        // Glass and stained glass are translucent but should not be treated as air-like here,
+        // so they can occlude neighbors and emit their own faces correctly (handled as TRANSLUCENT elsewhere).
 
         // Flora/billboard and torches should not occlude neighboring faces
         if (
@@ -747,10 +742,14 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             }
         }
 
-        // Most transparent blocks (but keep it conservative)
+        // Most transparent blocks (but keep it conservative). Exclude glass variants so they are not treated as air-like.
         if (
             block instanceof TransparentBlock &&
-            !(block instanceof SnowLayerBlock)
+            !(block instanceof SnowLayerBlock) &&
+            block != Blocks.GLASS &&
+            block != Blocks.TINTED_GLASS &&
+            !(block instanceof StainedGlassBlock) &&
+            !(block instanceof StainedGlassPaneBlock)
         ) {
             return true;
         }

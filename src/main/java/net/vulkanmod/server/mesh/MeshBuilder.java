@@ -216,25 +216,12 @@ public final class MeshBuilder {
                     // North (-Z)
                     if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
                         set3(nrm, 0, 0, -1);
-                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_side;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "side"
-                                );
-                        } else {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
                         float su0 = __uv_side.u0,
                             sv0 = __uv_side.v0,
                             su1 = __uv_side.u1,
@@ -265,25 +252,12 @@ public final class MeshBuilder {
                     // South (+Z)
                     if (isAirOrOOB(acc, x, y, z + 1, minY, maxY)) {
                         set3(nrm, 0, 0, 1);
-                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_side;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "side"
-                                );
-                        } else {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
                         float su0 = __uv_side.u0,
                             sv0 = __uv_side.v0,
                             su1 = __uv_side.u1,
@@ -314,25 +288,12 @@ public final class MeshBuilder {
                     // West (-X)
                     if (isAirOrOOB(acc, x - 1, y, z, minY, maxY)) {
                         set3(nrm, -1, 0, 0);
-                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_side;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "side"
-                                );
-                        } else {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
                         float su0 = __uv_side.u0,
                             sv0 = __uv_side.v0,
                             su1 = __uv_side.u1,
@@ -363,25 +324,12 @@ public final class MeshBuilder {
                     // East (+X)
                     if (isAirOrOOB(acc, x + 1, y, z, minY, maxY)) {
                         set3(nrm, 1, 0, 0);
-                        // Use per-face atlas region for "side" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_side;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "side"
-                                );
-                        } else {
-                            __uv_side =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_side =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "side"
+                            );
                         float su0 = __uv_side.u0,
                             sv0 = __uv_side.v0,
                             su1 = __uv_side.u1,
@@ -412,25 +360,12 @@ public final class MeshBuilder {
                     // Top (+Y)
                     if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
                         set3(nrm, 0, 1, 0);
-                        // Use per-face atlas region for "top" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_t;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_t =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "top"
-                                );
-                        } else {
-                            __uv_t =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_t =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "top"
+                            );
                         float tu0 = __uv_t.u0,
                             tv0 = __uv_t.v0,
                             tu1 = __uv_t.u1,
@@ -461,25 +396,12 @@ public final class MeshBuilder {
                     // Bottom (-Y)
                     if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
                         set3(nrm, 0, -1, 0);
-                        // Use per-face atlas region for "bottom" if available, otherwise fallback to block-level
-                        ServerTextureAtlas.Region __uv_b;
-                        if (
-                            "grass".equals(key) ||
-                            "wood".equals(key) ||
-                            "dirt".equals(key) ||
-                            "stone".equals(key)
-                        ) {
-                            __uv_b =
-                                ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                    key,
-                                    "bottom"
-                                );
-                        } else {
-                            __uv_b =
-                                ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                    key
-                                );
-                        }
+                        // Use per-face atlas region; falls back internally if not defined
+                        ServerTextureAtlas.Region __uv_b =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "bottom"
+                            );
                         float bu0 = __uv_b.u0,
                             bv0 = __uv_b.v0,
                             bu1 = __uv_b.u1,
@@ -834,6 +756,31 @@ public final class MeshBuilder {
         return outColor;
     }
 
+    // Billboard lighting: no directional shading and no AO.
+    // Uses only sky/block light mix to avoid over-darkening on flora billboards.
+    private float[] applyBillboardLighting(
+        BlockAccessor acc,
+        int x,
+        int y,
+        int z,
+        float[] baseColor,
+        float[] outColor
+    ) {
+        float sky = clamp01(acc.getSkyLight(x, y, z) / 15.0f);
+        float blk = clamp01(acc.getBlockLight(x, y, z) / 15.0f);
+        float lmix =
+            cfg.skyLightWeight * sky + (1.0f - cfg.skyLightWeight) * blk;
+
+        // Neutral luminance (no directional term)
+        float lum = clamp01(0.5f + 0.5f * lmix);
+
+        outColor[0] = powf(baseColor[0] * lum, cfg.gamma);
+        outColor[1] = powf(baseColor[1] * lum, cfg.gamma);
+        outColor[2] = powf(baseColor[2] * lum, cfg.gamma);
+        outColor[3] = baseColor[3];
+        return outColor;
+    }
+
     private static Map<String, float[]> defaultColorLUT() {
         return new HashMap<>();
     }
@@ -855,7 +802,6 @@ public final class MeshBuilder {
         String s = k.toLowerCase();
         return (
             "leaves".equals(s) ||
-            "glass".equals(s) ||
             "short_grass".equals(s) ||
             "tall_grass".equals(s) ||
             "fern".equals(s) ||
@@ -868,7 +814,12 @@ public final class MeshBuilder {
     private static boolean isTranslucentKey(String k) {
         if (k == null) return false;
         String s = k.toLowerCase();
-        return ("water".equals(s) || "ice".equals(s) || "honey".equals(s));
+        return (
+            "water".equals(s) ||
+            "ice".equals(s) ||
+            "honey".equals(s) ||
+            "glass".equals(s)
+        );
     }
 
     public LayeredRegionMesh buildRegionLayered(
@@ -937,15 +888,28 @@ public final class MeshBuilder {
                             bu1 = __uvbb.u1,
                             bv1 = __uvbb.v1;
 
-                        // Simple up-facing normal for lighting
+                        // Billboard lighting: neutral (no directional shading and no AO) to avoid over-darkening
                         set3(nrm, 0, 1, 0);
-                        float[] colBB = applyFlatLighting(
+                        // Apply biome grass tint to billboard flora
+                        float[] baseTintBB = baseColor;
+                        if (acc instanceof WorldSnapshotAccessor wsBB) {
+                            int rgbBB = wsBB.getGrassTintRGB(x, y, z);
+                            float trBB = ((rgbBB >> 16) & 0xFF) / 255.0f;
+                            float tgBB = ((rgbBB >> 8) & 0xFF) / 255.0f;
+                            float tbBB = (rgbBB & 0xFF) / 255.0f;
+                            baseTintBB = new float[] {
+                                baseColor[0] * trBB,
+                                baseColor[1] * tgBB,
+                                baseColor[2] * tbBB,
+                                baseColor[3],
+                            };
+                        }
+                        float[] colBB = applyBillboardLighting(
                             acc,
                             x,
                             y,
                             z,
-                            nrm,
-                            baseColor,
+                            baseTintBB,
                             faceColor
                         );
 
@@ -1102,7 +1066,11 @@ public final class MeshBuilder {
                         : (cutout ? idxCutout : idxSolid);
 
                     // North (-Z)
-                    if (isAirOrOOB(acc, x, y, z - 1, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x, y, z - 1, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x, y, z - 1)).equals(key))
+                    ) {
                         set3(nrm, 0, 0, -1);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
@@ -1138,7 +1106,11 @@ public final class MeshBuilder {
                         );
                     }
                     // South (+Z)
-                    if (isAirOrOOB(acc, x, y, z + 1, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x, y, z + 1, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x, y, z + 1)).equals(key))
+                    ) {
                         set3(nrm, 0, 0, 1);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
@@ -1174,7 +1146,11 @@ public final class MeshBuilder {
                         );
                     }
                     // West (-X)
-                    if (isAirOrOOB(acc, x - 1, y, z, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x - 1, y, z, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x - 1, y, z)).equals(key))
+                    ) {
                         set3(nrm, -1, 0, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
@@ -1210,7 +1186,11 @@ public final class MeshBuilder {
                         );
                     }
                     // East (+X)
-                    if (isAirOrOOB(acc, x + 1, y, z, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x + 1, y, z, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x + 1, y, z)).equals(key))
+                    ) {
                         set3(nrm, 1, 0, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
@@ -1246,7 +1226,11 @@ public final class MeshBuilder {
                         );
                     }
                     // Top (+Y)
-                    if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x, y + 1, z, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x, y + 1, z)).equals(key))
+                    ) {
                         set3(nrm, 0, 1, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_t =
@@ -1282,7 +1266,11 @@ public final class MeshBuilder {
                         );
                     }
                     // Bottom (-Y)
-                    if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
+                    if (
+                        isAirOrOOB(acc, x, y - 1, z, minY, maxY) &&
+                        !(translucent &&
+                            safeKey(acc.getBlockKey(x, y - 1, z)).equals(key))
+                    ) {
                         set3(nrm, 0, -1, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_b =

@@ -629,6 +629,9 @@ public final class ServerTextureAtlas {
         // Translucent blocks (to be routed to TRANSLUCENT layer)
         m.put("ice", "minecraft:block/ice");
         m.put("honey", "minecraft:block/honey_block");
+        // Translucent panes and variants
+        m.put("glass_pane", "minecraft:block/glass");
+        m.put("stained_glass_pane", "minecraft:block/glass");
 
         m.put("default", "minecraft:block/stone");
         return m;
@@ -654,6 +657,17 @@ public final class ServerTextureAtlas {
         m.put("stone#top", "minecraft:block/stone");
         m.put("stone#side", "minecraft:block/stone");
         m.put("stone#bottom", "minecraft:block/stone");
+
+        // Water: top/bottom still, sides flowing
+        m.put("water#top", "minecraft:block/water_still");
+        m.put("water#bottom", "minecraft:block/water_still");
+        m.put("water#side", "minecraft:block/water_flow");
+
+        // Honey: per-face textures
+        m.put("honey#top", "minecraft:block/honey_block_top");
+        m.put("honey#side", "minecraft:block/honey_block_side");
+        m.put("honey#bottom", "minecraft:block/honey_block_bottom");
+
         return m;
     }
 
