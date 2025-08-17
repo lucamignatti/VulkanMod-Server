@@ -767,18 +767,21 @@ public final class MeshBuilder {
             b = baseColor[2],
             a = baseColor[3];
         String __k = safeKey(acc.getBlockKey(x, y, z));
-        if (
-            "grass".equals(__k) || "leaves".equals(__k) || "water".equals(__k)
-        ) {
-            if (acc instanceof WorldSnapshotAccessor ws) {
-                int rgb = ws.getBiomeTintRGB(x, y, z);
-                float tr = ((rgb >> 16) & 0xFF) / 255.0f;
-                float tg = ((rgb >> 8) & 0xFF) / 255.0f;
-                float tb = (rgb & 0xFF) / 255.0f;
-                r *= tr;
-                g *= tg;
-                b *= tb;
+        if (acc instanceof WorldSnapshotAccessor ws) {
+            int rgb = 0xFFFFFF;
+            if ("grass".equals(__k)) {
+                rgb = ws.getGrassTintRGB(x, y, z);
+            } else if ("leaves".equals(__k)) {
+                rgb = ws.getFoliageTintRGB(x, y, z);
+            } else if ("water".equals(__k)) {
+                rgb = ws.getWaterTintRGB(x, y, z);
             }
+            float tr = ((rgb >> 16) & 0xFF) / 255.0f;
+            float tg = ((rgb >> 8) & 0xFF) / 255.0f;
+            float tb = (rgb & 0xFF) / 255.0f;
+            r *= tr;
+            g *= tg;
+            b *= tb;
         }
 
         outColor[0] = r;

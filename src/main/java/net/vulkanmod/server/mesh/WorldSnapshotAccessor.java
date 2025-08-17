@@ -74,8 +74,12 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private final byte[] sky; // 0..15
     private final byte[] blk; // 0..15
     private final byte[] key; // category key code
-    // Coarse-grid biome tint (packed 0xRRGGBB) and grid metadata
+    // Coarse-grid biome tints (packed 0xRRGGBB) and grid metadata
+    // 'tint' retained for backward compatibility (defaults to grass)
     private int[] tint;
+    private int[] tintGrass;
+    private int[] tintFoliage;
+    private int[] tintWater;
     private int tintStep;
     private int tintW, tintH;
 
@@ -200,6 +204,9 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         final int yMid = cMinY + (Math.max(0, cMaxY - cMinY) / 2);
 
         int[] tt = new int[gx * gz];
+        int[] tg = new int[gx * gz];
+        int[] tf = new int[gx * gz];
+        int[] tw = new int[gx * gz];
 
         for (int j = 0; j < gz; j++) {
             int z0 = minZ + j * step + (step / 2);
@@ -358,11 +365,20 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                     col = 0xFFFFFF;
                 }
 
-                tt[j * gx + i] = col;
+                int __idx = j * gx + i;
+                // Legacy combined tint (use grass/foliage approximation)
+                tt[__idx] = col;
+                // Separate grids (grass/foliage use same approximation for now; water kept neutral until translucent phase)
+                tg[__idx] = col;
+                tf[__idx] = col;
+                tw[__idx] = 0xFFFFFF;
             }
         }
 
         snap.tint = tt;
+        snap.tintGrass = tg;
+        snap.tintFoliage = tf;
+        snap.tintWater = tw;
         snap.tintStep = step;
         snap.tintW = gx;
         snap.tintH = gz;
@@ -394,17 +410,12 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         return blk[idxLocal(x, y, z)] & 0xFF;
     }
 
-    // Biome tint accessor (packed 0xRRGGBB). Uses coarse-grid precomputed values.
-    public int getBiomeTintRGB(int x, int y, int z) {
+    // Grass tint accessor (packed 0xRRGGBB). Uses coarse-grid precomputed values.
+    public int getGrassTintRGB(int x, int y, int z) {
         if (!inBounds(x, y, z)) return 0xFFFFFF;
         if (
-            this.tint == null ||
-            this.tintW <= 0 ||
-            this.tintH <= 0 ||
-            this.tintStep <= 0
-        ) {
-            return 0xFFFFFF;
-        }
+            this.tintW <= 0 || this.tintH <= 0 || this.tintStep <= 0
+        ) return 0xFFFFFF;
         int ix = (x - this.minX) / this.tintStep;
         int iz = (z - this.minZ) / this.tintStep;
         if (ix < 0) ix = 0;
@@ -412,8 +423,61 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         if (ix >= this.tintW) ix = this.tintW - 1;
         if (iz >= this.tintH) iz = this.tintH - 1;
         int idx = iz * this.tintW + ix;
-        if (idx < 0 || idx >= this.tint.length) return 0xFFFFFF;
-        return this.tint[idx];
+        if (
+            this.tintGrass != null && idx >= 0 && idx < this.tintGrass.length
+        ) return this.tintGrass[idx];
+        if (
+            this.tint != null && idx >= 0 && idx < this.tint.length
+        ) return this.tint[idx];
+        return 0xFFFFFF;
+    }
+
+    // Foliage tint accessor (packed 0xRRGGBB). Uses coarse-grid precomputed values.
+    public int getFoliageTintRGB(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return 0xFFFFFF;
+        if (
+            this.tintW <= 0 || this.tintH <= 0 || this.tintStep <= 0
+        ) return 0xFFFFFF;
+        int ix = (x - this.minX) / this.tintStep;
+        int iz = (z - this.minZ) / this.tintStep;
+        if (ix < 0) ix = 0;
+        if (iz < 0) iz = 0;
+        if (ix >= this.tintW) ix = this.tintW - 1;
+        if (iz >= this.tintH) iz = this.tintH - 1;
+        int idx = iz * this.tintW + ix;
+        if (
+            this.tintFoliage != null &&
+            idx >= 0 &&
+            idx < this.tintFoliage.length
+        ) return this.tintFoliage[idx];
+        if (
+            this.tint != null && idx >= 0 && idx < this.tint.length
+        ) return this.tint[idx];
+        return 0xFFFFFF;
+    }
+
+    // Water tint accessor (packed 0xRRGGBB). Uses coarse-grid precomputed values (neutral for now).
+    public int getWaterTintRGB(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return 0xFFFFFF;
+        if (
+            this.tintW <= 0 || this.tintH <= 0 || this.tintStep <= 0
+        ) return 0xFFFFFF;
+        int ix = (x - this.minX) / this.tintStep;
+        int iz = (z - this.minZ) / this.tintStep;
+        if (ix < 0) ix = 0;
+        if (iz < 0) iz = 0;
+        if (ix >= this.tintW) ix = this.tintW - 1;
+        if (iz >= this.tintH) iz = this.tintH - 1;
+        int idx = iz * this.tintW + ix;
+        if (
+            this.tintWater != null && idx >= 0 && idx < this.tintWater.length
+        ) return this.tintWater[idx];
+        return 0xFFFFFF;
+    }
+
+    // Backward compatibility: biome tint defaults to grass tint
+    public int getBiomeTintRGB(int x, int y, int z) {
+        return getGrassTintRGB(x, y, z);
     }
 
     // Offset helpers to avoid repeated addition and bounds checks at call sites
