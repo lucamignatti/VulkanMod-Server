@@ -156,10 +156,11 @@ public final class MeshBuilder {
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
-                    // Resolve UV region from the server-side texture atlas for this block key
+                    // Resolve UV region from the server-side texture atlas for this block key (default to "side" face)
                     ServerTextureAtlas.Region __uv =
-                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                            key
+                        ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                            key,
+                            "side"
                         );
                     float u0 = __uv.u0,
                         v0 = __uv.v0,
@@ -276,6 +277,16 @@ public final class MeshBuilder {
                     // Top (+Y)
                     if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
                         set3(nrm, 0, 1, 0);
+                        // Use per-face atlas region for "top"
+                        ServerTextureAtlas.Region __uv_t =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "top"
+                            );
+                        float tu0 = __uv_t.u0,
+                            tv0 = __uv_t.v0,
+                            tu1 = __uv_t.u1,
+                            tv1 = __uv_t.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -293,15 +304,25 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            tu0,
+                            tv0,
+                            tu1,
+                            tv1
                         );
                     }
                     // Bottom (-Y)
                     if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
                         set3(nrm, 0, -1, 0);
+                        // Use per-face atlas region for "bottom"
+                        ServerTextureAtlas.Region __uv_b =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "bottom"
+                            );
+                        float bu0 = __uv_b.u0,
+                            bv0 = __uv_b.v0,
+                            bu1 = __uv_b.u1,
+                            bv1 = __uv_b.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -319,10 +340,10 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            bu0,
+                            bv0,
+                            bu1,
+                            bv1
                         );
                     }
                 }
@@ -605,10 +626,11 @@ public final class MeshBuilder {
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
-                    // Resolve UV region from the server-side texture atlas for this block key
+                    // Resolve UV region from the server-side texture atlas for this block key (default to "side" face)
                     ServerTextureAtlas.Region __uv =
-                        ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                            key
+                        ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                            key,
+                            "side"
                         );
                     float u0 = __uv.u0,
                         v0 = __uv.v0,
@@ -726,6 +748,16 @@ public final class MeshBuilder {
                     // Top (+Y)
                     if (isAirOrOOB(acc, x, y + 1, z, minY, maxY)) {
                         set3(nrm, 0, 1, 0);
+                        // Use per-face atlas region for "top"
+                        ServerTextureAtlas.Region __uv_t =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "top"
+                            );
+                        float tu0 = __uv_t.u0,
+                            tv0 = __uv_t.v0,
+                            tu1 = __uv_t.u1,
+                            tv1 = __uv_t.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -743,15 +775,25 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            tu0,
+                            tv0,
+                            tu1,
+                            tv1
                         );
                     }
                     // Bottom (-Y)
                     if (isAirOrOOB(acc, x, y - 1, z, minY, maxY)) {
                         set3(nrm, 0, -1, 0);
+                        // Use per-face atlas region for "bottom"
+                        ServerTextureAtlas.Region __uv_b =
+                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
+                                key,
+                                "bottom"
+                            );
+                        float bu0 = __uv_b.u0,
+                            bv0 = __uv_b.v0,
+                            bu1 = __uv_b.u1,
+                            bv1 = __uv_b.v1;
                         emitFaceQuad(
                             vtx,
                             idx,
@@ -769,10 +811,10 @@ public final class MeshBuilder {
                                 baseColor,
                                 faceColor
                             ),
-                            u0,
-                            v0,
-                            u1,
-                            v1
+                            bu0,
+                            bv0,
+                            bu1,
+                            bv1
                         );
                     }
                 }

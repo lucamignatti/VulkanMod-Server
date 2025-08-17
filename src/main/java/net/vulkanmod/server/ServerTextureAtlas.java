@@ -104,14 +104,20 @@ public final class ServerTextureAtlas {
         new ConcurrentHashMap<>();
     // Mapping: "block key" (mesher categories) -> texture logical name
     private final Map<String, String> keyToTexture = new ConcurrentHashMap<>();
+    // Mapping: "block key#face" (e.g., grass#top, wood#side) -> texture logical name
+    private final Map<String, String> keyFaceToTexture =
+        new ConcurrentHashMap<>();
 
     // List of texture logical names required for our current categories
     private static final Map<String, String> DEFAULT_KEY_TO_BLOCK_TEXTURE =
         defaultKeyToTextureMapping();
+    private static final Map<String, String> DEFAULT_FACE_KEY_TO_BLOCK_TEXTURE =
+        defaultFaceKeyToTextureMapping();
 
     private ServerTextureAtlas() {
         // Prepare mapping table with defaults
         this.keyToTexture.putAll(DEFAULT_KEY_TO_BLOCK_TEXTURE);
+        this.keyFaceToTexture.putAll(DEFAULT_FACE_KEY_TO_BLOCK_TEXTURE);
     }
 
     /**
@@ -149,6 +155,8 @@ public final class ServerTextureAtlas {
 
         // Build a minimal set of textures: at least those referenced by keyToTexture.
         Set<String> required = new LinkedHashSet<>(keyToTexture.values());
+        // Include per-face mappings as well (e.g., grass#top, wood#side)
+        required.addAll(keyFaceToTexture.values());
         // Also include their de-namespace short names if present (some packs have only "block/stone.png" form)
         for (String v : new ArrayList<>(required)) {
             if (v.startsWith("minecraft:")) {
@@ -202,6 +210,37 @@ public final class ServerTextureAtlas {
         Region r = regionByTexture.get(canonical(textureName));
         if (r == null) {
             // If atlas not loaded yet OR missing mapping, return the first region if available
+            r = regionByTexture
+                .values()
+                .stream()
+                .findFirst()
+                .orElse(new Region(0f, 0f, 1f, 1f));
+        }
+        return r;
+    }
+
+    // Per-face region lookup: faceHint can be "top","bottom","side"; falls back to getRegionForBlockKey
+    public Region getRegionForBlockFace(String blockKey, String faceHint) {
+        if (blockKey == null) blockKey = "default";
+        String face = (faceHint == null
+                ? "side"
+                : faceHint.toLowerCase(java.util.Locale.ROOT));
+        String k = blockKey.toLowerCase(java.util.Locale.ROOT) + "#" + face;
+        String textureName = keyFaceToTexture.get(k);
+        if (textureName == null) {
+            // try a reasonable fallback to "side"
+            if (!"side".equals(face)) {
+                textureName = keyFaceToTexture.get(
+                    blockKey.toLowerCase(java.util.Locale.ROOT) + "#side"
+                );
+            }
+            if (textureName == null) {
+                // fallback to block-level mapping if no per-face mapping exists
+                return getRegionForBlockKey(blockKey);
+            }
+        }
+        Region r = regionByTexture.get(canonical(textureName));
+        if (r == null) {
             r = regionByTexture
                 .values()
                 .stream()
@@ -398,8 +437,122 @@ public final class ServerTextureAtlas {
                     padding +
                     (cellSize - li.img.getHeight()) / 2;
 
-                // Draw image
+                // Draw image and bleed 1px edges into padding to avoid seams
                 g.drawImage(li.img, dstX, dstY, null);
+                {
+                    int iw = li.img.getWidth();
+                    int ih = li.img.getHeight();
+
+                    // Left/right 1px columns
+                    // Left bleed
+                    g.drawImage(
+                        li.img,
+                        dstX - 1,
+                        dstY,
+                        dstX,
+                        dstY + ih,
+                        0,
+                        0,
+                        1,
+                        ih,
+                        null
+                    );
+                    // Right bleed
+                    g.drawImage(
+                        li.img,
+                        dstX + iw,
+                        dstY,
+                        dstX + iw + 1,
+                        dstY + ih,
+                        iw - 1,
+                        0,
+                        iw,
+                        ih,
+                        null
+                    );
+
+                    // Top/bottom 1px rows
+                    // Top bleed
+                    g.drawImage(
+                        li.img,
+                        dstX - 1,
+                        dstY - 1,
+                        dstX + iw + 1,
+                        dstY,
+                        0,
+                        0,
+                        iw,
+                        1,
+                        null
+                    );
+                    // Bottom bleed
+                    g.drawImage(
+                        li.img,
+                        dstX - 1,
+                        dstY + ih,
+                        dstX + iw + 1,
+                        dstY + ih + 1,
+                        0,
+                        ih - 1,
+                        iw,
+                        ih,
+                        null
+                    );
+
+                    // Corner pixels
+                    // Top-left
+                    g.drawImage(
+                        li.img,
+                        dstX - 1,
+                        dstY - 1,
+                        dstX,
+                        dstY,
+                        0,
+                        0,
+                        1,
+                        1,
+                        null
+                    );
+                    // Top-right
+                    g.drawImage(
+                        li.img,
+                        dstX + iw,
+                        dstY - 1,
+                        dstX + iw + 1,
+                        dstY,
+                        iw - 1,
+                        0,
+                        iw,
+                        1,
+                        null
+                    );
+                    // Bottom-left
+                    g.drawImage(
+                        li.img,
+                        dstX - 1,
+                        dstY + ih,
+                        dstX,
+                        dstY + ih + 1,
+                        0,
+                        ih - 1,
+                        1,
+                        ih,
+                        null
+                    );
+                    // Bottom-right
+                    g.drawImage(
+                        li.img,
+                        dstX + iw,
+                        dstY + ih,
+                        dstX + iw + 1,
+                        dstY + ih + 1,
+                        iw - 1,
+                        ih - 1,
+                        iw,
+                        ih,
+                        null
+                    );
+                }
 
                 // Compute normalized UVs for the content area (without padding).
                 // We prefer to include only the inner content (not padding) in the UV range.
@@ -448,6 +601,20 @@ public final class ServerTextureAtlas {
         m.put("lapis", "minecraft:block/lapis_ore");
         m.put("obsidian", "minecraft:block/obsidian");
         m.put("default", "minecraft:block/stone");
+        return m;
+    }
+
+    private static Map<String, String> defaultFaceKeyToTextureMapping() {
+        Map<String, String> m = new LinkedHashMap<>();
+        // Per-face keys use the format "<blockKey>#<face>"
+        // Grass: top, side, bottom (bottom uses dirt)
+        m.put("grass#top", "minecraft:block/grass_block_top");
+        m.put("grass#side", "minecraft:block/grass_block_side");
+        m.put("grass#bottom", "minecraft:block/dirt");
+        // Wood: side (bark) and top (log end)
+        m.put("wood#side", "minecraft:block/oak_log");
+        m.put("wood#top", "minecraft:block/oak_log_top");
+        // Extend in future for more blocks as needed
         return m;
     }
 
@@ -507,6 +674,26 @@ public final class ServerTextureAtlas {
         if (blockKey == null || textureLogicalName == null) return;
         keyToTexture.put(
             blockKey.toLowerCase(Locale.ROOT),
+            canonical(textureLogicalName)
+        );
+    }
+
+    /**
+     * Override or extend the per-face mapping of a block key.
+     * Face hint expected values: "top", "bottom", "side".
+     * Example name formats accepted: "minecraft:block/stone" or "block/stone".
+     */
+    public void putFaceKeyMapping(
+        String blockKey,
+        String faceHint,
+        String textureLogicalName
+    ) {
+        if (
+            blockKey == null || faceHint == null || textureLogicalName == null
+        ) return;
+        String face = faceHint.toLowerCase(Locale.ROOT);
+        keyFaceToTexture.put(
+            (blockKey.toLowerCase(Locale.ROOT) + "#" + face),
             canonical(textureLogicalName)
         );
     }
