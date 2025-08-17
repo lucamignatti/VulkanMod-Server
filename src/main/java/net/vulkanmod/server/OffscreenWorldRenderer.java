@@ -348,6 +348,11 @@ public final class OffscreenWorldRenderer {
             VkPhysicalDeviceFeatures features = VkPhysicalDeviceFeatures.calloc(
                 stack
             );
+            // Enable sampler anisotropy only if the device supports it
+            VkPhysicalDeviceFeatures supported =
+                VkPhysicalDeviceFeatures.calloc(stack);
+            vkGetPhysicalDeviceFeatures(physicalDevice, supported);
+            features.samplerAnisotropy(supported.samplerAnisotropy());
 
             VkDeviceCreateInfo dci = VkDeviceCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
@@ -525,19 +530,65 @@ public final class OffscreenWorldRenderer {
                         org.lwjgl.system.MemoryStack.stackPush()
                 ) {
                     // Create atlas image (optimal, sampled, transfer dst)
-                    boolean okImg = createImage(
-                        atlasW,
-                        atlasH,
-                        COLOR_FORMAT,
-                        VK_IMAGE_TILING_OPTIMAL,
-                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                        VK_IMAGE_USAGE_SAMPLED_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        (img, mem) -> {
-                            atlasImage = img;
-                            atlasImageMemory = mem;
+                    int __maxDim = Math.max(atlasW, atlasH);
+                    int __mipLevels =
+                        1 +
+                        Integer.numberOfTrailingZeros(
+                            Integer.highestOneBit(__maxDim)
+                        );
+                    boolean okImg = false;
+                    {
+                        LongBuffer pImg = st.mallocLong(1);
+                        VkImageCreateInfo ici = VkImageCreateInfo.calloc(st)
+                            .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                            .imageType(VK_IMAGE_TYPE_2D)
+                            .format(COLOR_FORMAT)
+                            .extent(VkExtent3D(st, atlasW, atlasH, 1))
+                            .mipLevels(__mipLevels)
+                            .arrayLayers(1)
+                            .samples(VK_SAMPLE_COUNT_1_BIT)
+                            .tiling(VK_IMAGE_TILING_OPTIMAL)
+                            .usage(
+                                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT
+                            )
+                            .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+                        int errImg = vkCreateImage(device, ici, null, pImg);
+                        if (errImg == VK_SUCCESS) {
+                            long img = pImg.get(0);
+                            VkMemoryRequirements req =
+                                VkMemoryRequirements.calloc(st);
+                            vkGetImageMemoryRequirements(device, img, req);
+                            int memTypeIndex = findMemoryType(
+                                req.memoryTypeBits(),
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                            );
+                            if (memTypeIndex >= 0) {
+                                VkMemoryAllocateInfo mai =
+                                    VkMemoryAllocateInfo.calloc(st)
+                                        .sType(
+                                            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+                                        )
+                                        .allocationSize(req.size())
+                                        .memoryTypeIndex(memTypeIndex);
+                                LongBuffer pMem = st.mallocLong(1);
+                                int errMem = vkAllocateMemory(
+                                    device,
+                                    mai,
+                                    null,
+                                    pMem
+                                );
+                                if (errMem == VK_SUCCESS) {
+                                    long mem = pMem.get(0);
+                                    vkBindImageMemory(device, img, mem, 0);
+                                    atlasImage = img;
+                                    atlasImageMemory = mem;
+                                    okImg = true;
+                                }
+                            }
                         }
-                    );
+                    }
                     if (!okImg) {
                         System.err.println(
                             "OffscreenWorldRenderer: failed to create atlas image"
@@ -555,7 +606,7 @@ public final class OffscreenWorldRenderer {
                             VkImageSubresourceRange.calloc(st)
                                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                                 .baseMipLevel(0)
-                                .levelCount(1)
+                                .levelCount(__mipLevels)
                                 .baseArrayLayer(0)
                                 .layerCount(1);
                         ivci.subresourceRange(sub);
@@ -579,9 +630,9 @@ public final class OffscreenWorldRenderer {
                                     .sType(
                                         VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
                                     )
-                                    .magFilter(VK_FILTER_NEAREST)
-                                    .minFilter(VK_FILTER_NEAREST)
-                                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                                    .magFilter(VK_FILTER_LINEAR)
+                                    .minFilter(VK_FILTER_LINEAR)
+                                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
                                     .addressModeU(
                                         VK_SAMPLER_ADDRESS_MODE_REPEAT
                                     )
@@ -591,10 +642,42 @@ public final class OffscreenWorldRenderer {
                                     .addressModeW(
                                         VK_SAMPLER_ADDRESS_MODE_REPEAT
                                     )
-                                    .maxLod(0.0f)
+                                    .maxLod((float) (__mipLevels - 1))
                                     .minLod(0.0f)
                                     .mipLodBias(0.0f)
                                     .unnormalizedCoordinates(false);
+                            // Enable anisotropy if supported; clamp to device limit
+                            {
+                                org.lwjgl.vulkan.VkPhysicalDeviceFeatures avail =
+                                    org.lwjgl.vulkan.VkPhysicalDeviceFeatures.calloc(
+                                        st
+                                    );
+                                vkGetPhysicalDeviceFeatures(
+                                    physicalDevice,
+                                    avail
+                                );
+                                org.lwjgl.vulkan.VkPhysicalDeviceProperties props =
+                                    org.lwjgl.vulkan.VkPhysicalDeviceProperties.calloc(
+                                        st
+                                    );
+                                vkGetPhysicalDeviceProperties(
+                                    physicalDevice,
+                                    props
+                                );
+                                if (avail.samplerAnisotropy()) {
+                                    sci
+                                        .anisotropyEnable(true)
+                                        .maxAnisotropy(
+                                            props
+                                                .limits()
+                                                .maxSamplerAnisotropy()
+                                        );
+                                } else {
+                                    sci
+                                        .anisotropyEnable(false)
+                                        .maxAnisotropy(1.0f);
+                                }
+                            }
                             int errSp = vkCreateSampler(
                                 device,
                                 sci,
@@ -674,15 +757,256 @@ public final class OffscreenWorldRenderer {
                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                         r
                                     );
-                                    transitionImageLayout(
-                                        st,
-                                        cmd,
-                                        atlasImage,
-                                        COLOR_FORMAT,
-                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                        VK_IMAGE_ASPECT_COLOR_BIT
-                                    );
+                                    // Generate mipmaps via blit chain
+                                    int srcW = atlasW;
+                                    int srcH = atlasH;
+                                    for (
+                                        int level = 1;
+                                        level < __mipLevels;
+                                        level++
+                                    ) {
+                                        // Previous level: TRANSFER_DST -> TRANSFER_SRC
+                                        {
+                                            VkImageMemoryBarrier.Buffer barrier =
+                                                VkImageMemoryBarrier.calloc(
+                                                    1,
+                                                    st
+                                                )
+                                                    .sType(
+                                                        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                    )
+                                                    .oldLayout(
+                                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                    )
+                                                    .newLayout(
+                                                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                                    )
+                                                    .srcQueueFamilyIndex(
+                                                        VK_QUEUE_FAMILY_IGNORED
+                                                    )
+                                                    .dstQueueFamilyIndex(
+                                                        VK_QUEUE_FAMILY_IGNORED
+                                                    )
+                                                    .image(atlasImage);
+                                            VkImageSubresourceRange range =
+                                                VkImageSubresourceRange.calloc(
+                                                    st
+                                                )
+                                                    .aspectMask(
+                                                        VK_IMAGE_ASPECT_COLOR_BIT
+                                                    )
+                                                    .baseMipLevel(level - 1)
+                                                    .levelCount(1)
+                                                    .baseArrayLayer(0)
+                                                    .layerCount(1);
+                                            barrier.subresourceRange(range);
+                                            barrier.srcAccessMask(
+                                                VK_ACCESS_TRANSFER_WRITE_BIT
+                                            );
+                                            barrier.dstAccessMask(
+                                                VK_ACCESS_TRANSFER_READ_BIT
+                                            );
+                                            vkCmdPipelineBarrier(
+                                                cmd,
+                                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                0,
+                                                null,
+                                                null,
+                                                barrier
+                                            );
+                                        }
+                                        // Next level: UNDEFINED -> TRANSFER_DST
+                                        {
+                                            VkImageMemoryBarrier.Buffer barrier =
+                                                VkImageMemoryBarrier.calloc(
+                                                    1,
+                                                    st
+                                                )
+                                                    .sType(
+                                                        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                    )
+                                                    .oldLayout(
+                                                        VK_IMAGE_LAYOUT_UNDEFINED
+                                                    )
+                                                    .newLayout(
+                                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                    )
+                                                    .srcQueueFamilyIndex(
+                                                        VK_QUEUE_FAMILY_IGNORED
+                                                    )
+                                                    .dstQueueFamilyIndex(
+                                                        VK_QUEUE_FAMILY_IGNORED
+                                                    )
+                                                    .image(atlasImage);
+                                            VkImageSubresourceRange range =
+                                                VkImageSubresourceRange.calloc(
+                                                    st
+                                                )
+                                                    .aspectMask(
+                                                        VK_IMAGE_ASPECT_COLOR_BIT
+                                                    )
+                                                    .baseMipLevel(level)
+                                                    .levelCount(1)
+                                                    .baseArrayLayer(0)
+                                                    .layerCount(1);
+                                            barrier.subresourceRange(range);
+                                            barrier.srcAccessMask(0);
+                                            barrier.dstAccessMask(
+                                                VK_ACCESS_TRANSFER_WRITE_BIT
+                                            );
+                                            vkCmdPipelineBarrier(
+                                                cmd,
+                                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                0,
+                                                null,
+                                                null,
+                                                barrier
+                                            );
+                                        }
+                                        org.lwjgl.vulkan.VkImageBlit.Buffer blit =
+                                            org.lwjgl.vulkan.VkImageBlit.calloc(
+                                                1,
+                                                st
+                                            );
+                                        blit
+                                            .get(0)
+                                            .srcSubresource()
+                                            .aspectMask(
+                                                VK_IMAGE_ASPECT_COLOR_BIT
+                                            )
+                                            .mipLevel(level - 1)
+                                            .baseArrayLayer(0)
+                                            .layerCount(1);
+                                        blit.get(0).srcOffsets(0).set(0, 0, 0);
+                                        blit
+                                            .get(0)
+                                            .srcOffsets(1)
+                                            .set(srcW, srcH, 1);
+                                        int dstW = Math.max(1, srcW / 2);
+                                        int dstH = Math.max(1, srcH / 2);
+                                        blit
+                                            .get(0)
+                                            .dstSubresource()
+                                            .aspectMask(
+                                                VK_IMAGE_ASPECT_COLOR_BIT
+                                            )
+                                            .mipLevel(level)
+                                            .baseArrayLayer(0)
+                                            .layerCount(1);
+                                        blit.get(0).dstOffsets(0).set(0, 0, 0);
+                                        blit
+                                            .get(0)
+                                            .dstOffsets(1)
+                                            .set(dstW, dstH, 1);
+                                        vkCmdBlitImage(
+                                            cmd,
+                                            atlasImage,
+                                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                            atlasImage,
+                                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                            blit,
+                                            VK_FILTER_LINEAR
+                                        );
+                                        srcW = dstW;
+                                        srcH = dstH;
+                                    }
+                                    // Transition all mips to shader read-only
+                                    for (
+                                        int level = 0;
+                                        level < __mipLevels - 1;
+                                        level++
+                                    ) {
+                                        VkImageMemoryBarrier.Buffer barrier =
+                                            VkImageMemoryBarrier.calloc(1, st)
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                )
+                                                .oldLayout(
+                                                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                                )
+                                                .newLayout(
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                )
+                                                .srcQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .dstQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .image(atlasImage);
+                                        VkImageSubresourceRange range =
+                                            VkImageSubresourceRange.calloc(st)
+                                                .aspectMask(
+                                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                                )
+                                                .baseMipLevel(level)
+                                                .levelCount(1)
+                                                .baseArrayLayer(0)
+                                                .layerCount(1);
+                                        barrier.subresourceRange(range);
+                                        barrier.srcAccessMask(
+                                            VK_ACCESS_TRANSFER_READ_BIT
+                                        );
+                                        barrier.dstAccessMask(
+                                            VK_ACCESS_SHADER_READ_BIT
+                                        );
+                                        vkCmdPipelineBarrier(
+                                            cmd,
+                                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                            0,
+                                            null,
+                                            null,
+                                            barrier
+                                        );
+                                    }
+                                    {
+                                        VkImageMemoryBarrier.Buffer barrier =
+                                            VkImageMemoryBarrier.calloc(1, st)
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                )
+                                                .oldLayout(
+                                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                )
+                                                .newLayout(
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                )
+                                                .srcQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .dstQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .image(atlasImage);
+                                        VkImageSubresourceRange range =
+                                            VkImageSubresourceRange.calloc(st)
+                                                .aspectMask(
+                                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                                )
+                                                .baseMipLevel(__mipLevels - 1)
+                                                .levelCount(1)
+                                                .baseArrayLayer(0)
+                                                .layerCount(1);
+                                        barrier.subresourceRange(range);
+                                        barrier.srcAccessMask(
+                                            VK_ACCESS_TRANSFER_WRITE_BIT
+                                        );
+                                        barrier.dstAccessMask(
+                                            VK_ACCESS_SHADER_READ_BIT
+                                        );
+                                        vkCmdPipelineBarrier(
+                                            cmd,
+                                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                            0,
+                                            null,
+                                            null,
+                                            barrier
+                                        );
+                                    }
                                     endOneTimeCommands(cmd);
                                     // Descriptor pool and set
                                     LongBuffer pPool = st.mallocLong(1);
@@ -809,19 +1133,66 @@ public final class OffscreenWorldRenderer {
                 org.lwjgl.system.MemoryStack st =
                     org.lwjgl.system.MemoryStack.stackPush()
             ) {
-                boolean okImg = createImage(
-                    atlasW,
-                    atlasH,
-                    COLOR_FORMAT,
-                    VK_IMAGE_TILING_OPTIMAL,
-                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                    (img, mem) -> {
-                        atlasImage = img;
-                        atlasImageMemory = mem;
+                int __maxDim = Math.max(atlasW, atlasH);
+                int __mipLevels =
+                    1 +
+                    Integer.numberOfTrailingZeros(
+                        Integer.highestOneBit(__maxDim)
+                    );
+                boolean okImg = false;
+                {
+                    LongBuffer pImg = st.mallocLong(1);
+                    VkImageCreateInfo ici = VkImageCreateInfo.calloc(st)
+                        .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                        .imageType(VK_IMAGE_TYPE_2D)
+                        .format(COLOR_FORMAT)
+                        .extent(VkExtent3D(st, atlasW, atlasH, 1))
+                        .mipLevels(__mipLevels)
+                        .arrayLayers(1)
+                        .samples(VK_SAMPLE_COUNT_1_BIT)
+                        .tiling(VK_IMAGE_TILING_OPTIMAL)
+                        .usage(
+                            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                            VK_IMAGE_USAGE_SAMPLED_BIT
+                        )
+                        .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+                    int errImg = vkCreateImage(device, ici, null, pImg);
+                    if (errImg == VK_SUCCESS) {
+                        long img = pImg.get(0);
+                        VkMemoryRequirements req = VkMemoryRequirements.calloc(
+                            st
+                        );
+                        vkGetImageMemoryRequirements(device, img, req);
+                        int memTypeIndex = findMemoryType(
+                            req.memoryTypeBits(),
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        );
+                        if (memTypeIndex >= 0) {
+                            VkMemoryAllocateInfo mai =
+                                VkMemoryAllocateInfo.calloc(st)
+                                    .sType(
+                                        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+                                    )
+                                    .allocationSize(req.size())
+                                    .memoryTypeIndex(memTypeIndex);
+                            LongBuffer pMem = st.mallocLong(1);
+                            int errMem = vkAllocateMemory(
+                                device,
+                                mai,
+                                null,
+                                pMem
+                            );
+                            if (errMem == VK_SUCCESS) {
+                                long mem = pMem.get(0);
+                                vkBindImageMemory(device, img, mem, 0);
+                                atlasImage = img;
+                                atlasImageMemory = mem;
+                                okImg = true;
+                            }
+                        }
                     }
-                );
+                }
                 if (okImg) {
                     LongBuffer pView = st.mallocLong(1);
                     VkImageViewCreateInfo ivci = VkImageViewCreateInfo.calloc(
@@ -835,7 +1206,7 @@ public final class OffscreenWorldRenderer {
                         VkImageSubresourceRange.calloc(st)
                             .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                             .baseMipLevel(0)
-                            .levelCount(1)
+                            .levelCount(__mipLevels)
                             .baseArrayLayer(0)
                             .layerCount(1);
                     ivci.subresourceRange(sub);
@@ -845,16 +1216,41 @@ public final class OffscreenWorldRenderer {
                         LongBuffer pSampler = st.mallocLong(1);
                         VkSamplerCreateInfo sci = VkSamplerCreateInfo.calloc(st)
                             .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
-                            .magFilter(VK_FILTER_NEAREST)
-                            .minFilter(VK_FILTER_NEAREST)
-                            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                            .magFilter(VK_FILTER_LINEAR)
+                            .minFilter(VK_FILTER_LINEAR)
+                            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
                             .addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT)
                             .addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT)
                             .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT)
-                            .maxLod(0.0f)
+                            .maxLod((float) (__mipLevels - 1))
                             .minLod(0.0f)
                             .mipLodBias(0.0f)
                             .unnormalizedCoordinates(false);
+                        // Enable anisotropy if supported; clamp to device limit
+                        {
+                            org.lwjgl.vulkan.VkPhysicalDeviceFeatures avail =
+                                org.lwjgl.vulkan.VkPhysicalDeviceFeatures.calloc(
+                                    st
+                                );
+                            vkGetPhysicalDeviceFeatures(physicalDevice, avail);
+                            org.lwjgl.vulkan.VkPhysicalDeviceProperties props =
+                                org.lwjgl.vulkan.VkPhysicalDeviceProperties.calloc(
+                                    st
+                                );
+                            vkGetPhysicalDeviceProperties(
+                                physicalDevice,
+                                props
+                            );
+                            if (avail.samplerAnisotropy()) {
+                                sci
+                                    .anisotropyEnable(true)
+                                    .maxAnisotropy(
+                                        props.limits().maxSamplerAnisotropy()
+                                    );
+                            } else {
+                                sci.anisotropyEnable(false).maxAnisotropy(1.0f);
+                            }
+                        }
                         int errSp = vkCreateSampler(
                             device,
                             sci,
@@ -924,15 +1320,242 @@ public final class OffscreenWorldRenderer {
                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     r
                                 );
-                                transitionImageLayout(
-                                    st,
-                                    cmd,
-                                    atlasImage,
-                                    COLOR_FORMAT,
-                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                    VK_IMAGE_ASPECT_COLOR_BIT
-                                );
+                                // Generate mipmaps via blit chain
+                                int srcW = atlasW;
+                                int srcH = atlasH;
+                                for (
+                                    int level = 1;
+                                    level < __mipLevels;
+                                    level++
+                                ) {
+                                    // Previous level: TRANSFER_DST -> TRANSFER_SRC
+                                    {
+                                        VkImageMemoryBarrier.Buffer barrier =
+                                            VkImageMemoryBarrier.calloc(1, st)
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                )
+                                                .oldLayout(
+                                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                )
+                                                .newLayout(
+                                                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                                )
+                                                .srcQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .dstQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .image(atlasImage);
+                                        VkImageSubresourceRange range =
+                                            VkImageSubresourceRange.calloc(st)
+                                                .aspectMask(
+                                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                                )
+                                                .baseMipLevel(level - 1)
+                                                .levelCount(1)
+                                                .baseArrayLayer(0)
+                                                .layerCount(1);
+                                        barrier.subresourceRange(range);
+                                        barrier.srcAccessMask(
+                                            VK_ACCESS_TRANSFER_WRITE_BIT
+                                        );
+                                        barrier.dstAccessMask(
+                                            VK_ACCESS_TRANSFER_READ_BIT
+                                        );
+                                        vkCmdPipelineBarrier(
+                                            cmd,
+                                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            0,
+                                            null,
+                                            null,
+                                            barrier
+                                        );
+                                    }
+                                    // Next level: UNDEFINED -> TRANSFER_DST
+                                    {
+                                        VkImageMemoryBarrier.Buffer barrier =
+                                            VkImageMemoryBarrier.calloc(1, st)
+                                                .sType(
+                                                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                                )
+                                                .oldLayout(
+                                                    VK_IMAGE_LAYOUT_UNDEFINED
+                                                )
+                                                .newLayout(
+                                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                )
+                                                .srcQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .dstQueueFamilyIndex(
+                                                    VK_QUEUE_FAMILY_IGNORED
+                                                )
+                                                .image(atlasImage);
+                                        VkImageSubresourceRange range =
+                                            VkImageSubresourceRange.calloc(st)
+                                                .aspectMask(
+                                                    VK_IMAGE_ASPECT_COLOR_BIT
+                                                )
+                                                .baseMipLevel(level)
+                                                .levelCount(1)
+                                                .baseArrayLayer(0)
+                                                .layerCount(1);
+                                        barrier.subresourceRange(range);
+                                        barrier.srcAccessMask(0);
+                                        barrier.dstAccessMask(
+                                            VK_ACCESS_TRANSFER_WRITE_BIT
+                                        );
+                                        vkCmdPipelineBarrier(
+                                            cmd,
+                                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            0,
+                                            null,
+                                            null,
+                                            barrier
+                                        );
+                                    }
+                                    org.lwjgl.vulkan.VkImageBlit.Buffer blit =
+                                        org.lwjgl.vulkan.VkImageBlit.calloc(
+                                            1,
+                                            st
+                                        );
+                                    blit
+                                        .get(0)
+                                        .srcSubresource()
+                                        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                                        .mipLevel(level - 1)
+                                        .baseArrayLayer(0)
+                                        .layerCount(1);
+                                    blit.get(0).srcOffsets(0).set(0, 0, 0);
+                                    blit
+                                        .get(0)
+                                        .srcOffsets(1)
+                                        .set(srcW, srcH, 1);
+                                    int dstW = Math.max(1, srcW / 2);
+                                    int dstH = Math.max(1, srcH / 2);
+                                    blit
+                                        .get(0)
+                                        .dstSubresource()
+                                        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                                        .mipLevel(level)
+                                        .baseArrayLayer(0)
+                                        .layerCount(1);
+                                    blit.get(0).dstOffsets(0).set(0, 0, 0);
+                                    blit
+                                        .get(0)
+                                        .dstOffsets(1)
+                                        .set(dstW, dstH, 1);
+                                    vkCmdBlitImage(
+                                        cmd,
+                                        atlasImage,
+                                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                        atlasImage,
+                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                        blit,
+                                        VK_FILTER_LINEAR
+                                    );
+                                    srcW = dstW;
+                                    srcH = dstH;
+                                }
+                                // Transition all mips to shader read-only
+                                for (
+                                    int level = 0;
+                                    level < __mipLevels - 1;
+                                    level++
+                                ) {
+                                    VkImageMemoryBarrier.Buffer barrier =
+                                        VkImageMemoryBarrier.calloc(1, st)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                            )
+                                            .oldLayout(
+                                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                            )
+                                            .newLayout(
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                            )
+                                            .srcQueueFamilyIndex(
+                                                VK_QUEUE_FAMILY_IGNORED
+                                            )
+                                            .dstQueueFamilyIndex(
+                                                VK_QUEUE_FAMILY_IGNORED
+                                            )
+                                            .image(atlasImage);
+                                    VkImageSubresourceRange range =
+                                        VkImageSubresourceRange.calloc(st)
+                                            .aspectMask(
+                                                VK_IMAGE_ASPECT_COLOR_BIT
+                                            )
+                                            .baseMipLevel(level)
+                                            .levelCount(1)
+                                            .baseArrayLayer(0)
+                                            .layerCount(1);
+                                    barrier.subresourceRange(range);
+                                    barrier.srcAccessMask(
+                                        VK_ACCESS_TRANSFER_READ_BIT
+                                    );
+                                    barrier.dstAccessMask(
+                                        VK_ACCESS_SHADER_READ_BIT
+                                    );
+                                    vkCmdPipelineBarrier(
+                                        cmd,
+                                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                        0,
+                                        null,
+                                        null,
+                                        barrier
+                                    );
+                                }
+                                {
+                                    VkImageMemoryBarrier.Buffer barrier =
+                                        VkImageMemoryBarrier.calloc(1, st)
+                                            .sType(
+                                                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                                            )
+                                            .oldLayout(
+                                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                            )
+                                            .newLayout(
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                            )
+                                            .srcQueueFamilyIndex(
+                                                VK_QUEUE_FAMILY_IGNORED
+                                            )
+                                            .dstQueueFamilyIndex(
+                                                VK_QUEUE_FAMILY_IGNORED
+                                            )
+                                            .image(atlasImage);
+                                    VkImageSubresourceRange range =
+                                        VkImageSubresourceRange.calloc(st)
+                                            .aspectMask(
+                                                VK_IMAGE_ASPECT_COLOR_BIT
+                                            )
+                                            .baseMipLevel(__mipLevels - 1)
+                                            .levelCount(1)
+                                            .baseArrayLayer(0)
+                                            .layerCount(1);
+                                    barrier.subresourceRange(range);
+                                    barrier.srcAccessMask(
+                                        VK_ACCESS_TRANSFER_WRITE_BIT
+                                    );
+                                    barrier.dstAccessMask(
+                                        VK_ACCESS_SHADER_READ_BIT
+                                    );
+                                    vkCmdPipelineBarrier(
+                                        cmd,
+                                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                        0,
+                                        null,
+                                        null,
+                                        barrier
+                                    );
+                                }
                                 endOneTimeCommands(cmd);
                                 if (descriptorPool == 0L) {
                                     LongBuffer pPool = st.mallocLong(1);
