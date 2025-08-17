@@ -157,6 +157,24 @@ public final class ServerTextureAtlas {
         Set<String> required = new LinkedHashSet<>(keyToTexture.values());
         // Include per-face mappings as well (e.g., grass#top, wood#side)
         required.addAll(keyFaceToTexture.values());
+        // Explicitly include common flora/cutout textures to ensure atlas coverage even if not referenced yet
+        // Include multiple naming variants for version/resource-pack differences
+        String[] flora = new String[] {
+            "minecraft:block/short_grass",
+            "minecraft:block/grass",
+            "minecraft:block/tall_grass",
+            "minecraft:block/tall_grass_top",
+            "minecraft:block/fern",
+            "minecraft:block/dead_bush",
+            "minecraft:block/kelp",
+            "minecraft:block/torch",
+        };
+        for (String f : flora) {
+            required.add(f);
+            if (f.startsWith("minecraft:")) {
+                required.add(f.substring("minecraft:".length()));
+            }
+        }
         // Also include their de-namespace short names if present (some packs have only "block/stone.png" form)
         for (String v : new ArrayList<>(required)) {
             if (v.startsWith("minecraft:")) {
@@ -620,6 +638,7 @@ public final class ServerTextureAtlas {
         m.put("grass#top", "minecraft:block/grass_block_top");
         m.put("grass#side", "minecraft:block/grass_block_side");
         m.put("grass#bottom", "minecraft:block/dirt");
+
         // Wood: side (bark) and top (log end)
         m.put("wood#side", "minecraft:block/oak_log");
         m.put("wood#top", "minecraft:block/oak_log_top");

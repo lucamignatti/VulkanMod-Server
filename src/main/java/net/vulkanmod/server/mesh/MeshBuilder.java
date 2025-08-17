@@ -720,8 +720,6 @@ public final class MeshBuilder {
         for (int y = minY; y < maxY; y++) {
             for (int z = startZ; z < endZ; z++) {
                 for (int x = startX; x < endX; x++) {
-                    if (acc.isAir(x, y, z)) continue;
-
                     String key = safeKey(acc.getBlockKey(x, y, z));
                     float[] lutColor = cfg.colorLUT.getOrDefault(
                         key,
@@ -891,6 +889,7 @@ public final class MeshBuilder {
                         continue;
                     }
 
+                    if (acc.isAir(x, y, z)) continue;
                     // Resolve UV region from the server-side texture atlas for this block key
                     ServerTextureAtlas.Region __uv =
                         ServerTextureAtlas.getInstance().getRegionForBlockKey(

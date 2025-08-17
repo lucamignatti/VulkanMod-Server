@@ -301,6 +301,19 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             return true;
         }
 
+        // Version-tolerant: treat legacy 'minecraft:grass' plant as air-like (older versions)
+        {
+            Block __grass =
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.getOptional(
+                    net.minecraft.resources.ResourceLocation.tryParse(
+                        "minecraft:grass"
+                    )
+                ).orElse(null);
+            if (__grass == block) {
+                return true;
+            }
+        }
+
         // Most transparent blocks (but keep it conservative)
         if (
             block instanceof TransparentBlock &&
@@ -410,7 +423,17 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         if (block == Blocks.WATER) return KEY_WATER;
 
         // Flora / non-full blocks (billboard/cutout)
-        if (block == Blocks.SHORT_GRASS) return KEY_SHORT_GRASS; // short grass
+        {
+            Block __grass =
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.getOptional(
+                    net.minecraft.resources.ResourceLocation.tryParse(
+                        "minecraft:grass"
+                    )
+                ).orElse(null);
+            if (
+                block == Blocks.SHORT_GRASS || block == __grass
+            ) return KEY_SHORT_GRASS; // short grass (legacy 'grass' treated as short_grass)
+        }
         if (block == Blocks.TALL_GRASS) return KEY_TALL_GRASS;
         if (block == Blocks.FERN || block == Blocks.LARGE_FERN) return KEY_FERN;
         if (block == Blocks.DEAD_BUSH) return KEY_DEAD_BUSH;

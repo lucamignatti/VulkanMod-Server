@@ -512,6 +512,14 @@ public final class OffscreenWorldRenderer {
                         this.atlasW = at.getAtlasWidth();
                         this.atlasH = at.getAtlasHeight();
                         this.atlasPrepared = true;
+                        // Debug: write atlas PNG once for inspection (guarded; safe to overwrite)
+                        try {
+                            java.nio.file.Path __atlasDbg =
+                                java.nio.file.Paths.get("atlas_debug.png");
+                            net.vulkanmod.server.ServerTextureAtlas.getInstance().writeDebugAtlas(
+                                __atlasDbg
+                            );
+                        } catch (Throwable __ignored) {}
                     }
                 } catch (Throwable t) {
                     System.err.println(
