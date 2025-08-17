@@ -83,6 +83,12 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private int tintStep;
     private int tintW, tintH;
 
+    // Client colormap PNGs (if available). Loaded lazily on first use.
+    private static volatile int[] GRASS_MAP = null;
+    private static volatile int[] FOLIAGE_MAP = null;
+    private static volatile int MAP_W = 0,
+        MAP_H = 0;
+
     private WorldSnapshotAccessor(
         int minX,
         int minY,
@@ -208,6 +214,63 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         int[] tf = new int[gx * gz];
         int[] tw = new int[gx * gz];
 
+        // Lazy-load client colormaps (grass/foliage) from Minecraft assets if not yet loaded
+        if (GRASS_MAP == null || FOLIAGE_MAP == null) {
+            try {
+                java.io.InputStream gIn =
+                    WorldSnapshotAccessor.class.getClassLoader().getResourceAsStream(
+                        "assets/minecraft/textures/colormap/grass.png"
+                    );
+                java.io.InputStream fIn =
+                    WorldSnapshotAccessor.class.getClassLoader().getResourceAsStream(
+                        "assets/minecraft/textures/colormap/foliage.png"
+                    );
+                if (gIn != null) {
+                    java.awt.image.BufferedImage img =
+                        javax.imageio.ImageIO.read(gIn);
+                    if (img != null) {
+                        MAP_W = img.getWidth();
+                        MAP_H = img.getHeight();
+                        GRASS_MAP = img.getRGB(
+                            0,
+                            0,
+                            MAP_W,
+                            MAP_H,
+                            null,
+                            0,
+                            MAP_W
+                        );
+                    }
+                    gIn.close();
+                }
+                if (fIn != null) {
+                    java.awt.image.BufferedImage img2 =
+                        javax.imageio.ImageIO.read(fIn);
+                    if (img2 != null) {
+                        if (MAP_W == 0 || MAP_H == 0) {
+                            MAP_W = img2.getWidth();
+                            MAP_H = img2.getHeight();
+                        }
+                        FOLIAGE_MAP = img2.getRGB(
+                            0,
+                            0,
+                            img2.getWidth(),
+                            img2.getHeight(),
+                            null,
+                            0,
+                            img2.getWidth()
+                        );
+                    }
+                    fIn.close();
+                }
+            } catch (Throwable __e) {
+                GRASS_MAP = null;
+                FOLIAGE_MAP = null;
+                MAP_W = 0;
+                MAP_H = 0;
+            }
+        }
+
         for (int j = 0; j < gz; j++) {
             int z0 = minZ + j * step + (step / 2);
             if (z0 >= maxZ) z0 = Math.max(minZ, maxZ - 1);
@@ -217,85 +280,104 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
 
                 pos.set(x0, yMid, z0);
 
-                int col = 0xFFFFFF;
+                // Compute temperature and downfall once
+                float temp = 0.5f;
+                float moist = 0.5f;
+                int gcol = 0xFFFFFF;
+                int fcol = 0xFFFFFF;
+                int wcol = 0xFFFFFF;
+
                 try {
                     Holder<Biome> h = world.getBiome(pos);
                     Biome biome = h.value();
                     BiomeSpecialEffects fx = biome.getSpecialEffects();
-                    var grass = fx.getGrassColorOverride();
-                    var foliage = fx.getFoliageColorOverride();
-                    if (grass.isPresent()) {
-                        col = grass.get();
-                    } else if (foliage.isPresent()) {
-                        col = foliage.get();
-                    } else {
-                        float temp = 0.5f;
+
+                    // Reflective temperature read for mapping compatibility
+                    try {
+                        java.lang.reflect.Method m =
+                            net.minecraft.world.level.biome
+                                .Biome.class.getMethod(
+                                "getTemperature",
+                                net.minecraft.core.BlockPos.class
+                            );
+                        Object tv = m.invoke(biome, pos);
+                        temp = (tv instanceof Float f)
+                            ? f
+                            : ((Number) tv).floatValue();
+                    } catch (Throwable __t0) {
                         try {
-                            java.lang.reflect.Method m =
+                            java.lang.reflect.Method m2 =
                                 net.minecraft.world.level.biome
                                     .Biome.class.getMethod(
-                                    "getTemperature",
-                                    net.minecraft.core.BlockPos.class
+                                    "getBaseTemperature"
                                 );
-                            Object tv = m.invoke(biome, pos);
-                            if (tv instanceof Float f) temp = f;
-                            else temp = ((Number) tv).floatValue();
-                        } catch (Throwable __t0) {
+                            Object tv2 = m2.invoke(biome);
+                            temp = (tv2 instanceof Float f2)
+                                ? f2
+                                : ((Number) tv2).floatValue();
+                        } catch (Throwable __t1) {
                             try {
-                                java.lang.reflect.Method m2 =
+                                java.lang.reflect.Method m3 =
                                     net.minecraft.world.level.biome
-                                        .Biome.class.getMethod(
-                                        "getBaseTemperature"
-                                    );
-                                Object tv2 = m2.invoke(biome);
-                                if (tv2 instanceof Float f2) temp = f2;
-                                else temp = ((Number) tv2).floatValue();
-                            } catch (Throwable __t1) {
-                                try {
-                                    java.lang.reflect.Method m3 =
-                                        net.minecraft.world.level.biome
-                                            .Biome.class.getMethod(
-                                            "temperature"
-                                        );
-                                    Object tv3 = m3.invoke(biome);
-                                    if (tv3 instanceof Float f3) temp = f3;
-                                    else temp = ((Number) tv3).floatValue();
-                                } catch (Throwable __t2) {
-                                    temp = 0.5f;
-                                }
+                                        .Biome.class.getMethod("temperature");
+                                Object tv3 = m3.invoke(biome);
+                                temp = (tv3 instanceof Float f3)
+                                    ? f3
+                                    : ((Number) tv3).floatValue();
+                            } catch (Throwable __t2) {
+                                temp = 0.5f;
                             }
                         }
-                        float moist = 0.5f;
+                    }
+                    try {
+                        java.lang.reflect.Method md =
+                            net.minecraft.world.level.biome
+                                .Biome.class.getMethod("getDownfall");
+                        Object mv = md.invoke(biome);
+                        moist = (mv instanceof Float f4)
+                            ? f4
+                            : ((Number) mv).floatValue();
+                    } catch (Throwable __t3) {
                         try {
-                            java.lang.reflect.Method md =
+                            java.lang.reflect.Method md2 =
                                 net.minecraft.world.level.biome
-                                    .Biome.class.getMethod("getDownfall");
-                            Object mv = md.invoke(biome);
-                            if (mv instanceof Float f4) moist = f4;
-                            else moist = ((Number) mv).floatValue();
-                        } catch (Throwable __t3) {
-                            try {
-                                java.lang.reflect.Method md2 =
-                                    net.minecraft.world.level.biome
-                                        .Biome.class.getMethod("downfall");
-                                Object mv2 = md2.invoke(biome);
-                                if (mv2 instanceof Float f5) moist = f5;
-                                else moist = ((Number) mv2).floatValue();
-                            } catch (Throwable __t4) {
-                                moist = 0.5f;
-                            }
+                                    .Biome.class.getMethod("downfall");
+                            Object mv2 = md2.invoke(biome);
+                            moist = (mv2 instanceof Float f5)
+                                ? f5
+                                : ((Number) mv2).floatValue();
+                        } catch (Throwable __t4) {
+                            moist = 0.5f;
                         }
-                        // Clamp to [0..1]
-                        if (temp < 0f) temp = 0f;
-                        else if (temp > 1f) temp = 1f;
-                        if (moist < 0f) moist = 0f;
-                        else if (moist > 1f) moist = 1f;
+                    }
 
-                        // Approximate HSV-based grass/foliage tint from temperature and moisture
+                    // Clamp to [0..1]
+                    if (temp < 0f) temp = 0f;
+                    else if (temp > 1f) temp = 1f;
+                    if (moist < 0f) moist = 0f;
+                    else if (moist > 1f) moist = 1f;
+
+                    // Overrides
+                    var grass = fx.getGrassColorOverride();
+                    var foliage = fx.getFoliageColorOverride();
+
+                    // Grass color: override > colormap > HSV approx
+                    if (grass.isPresent()) {
+                        gcol = grass.get();
+                    } else if (GRASS_MAP != null && MAP_W > 0 && MAP_H > 0) {
+                        int ix = (int) (temp * (MAP_W - 1) + 0.5f);
+                        int iy = (int) (moist * (MAP_H - 1) + 0.5f);
+                        if (ix < 0) ix = 0;
+                        if (iy < 0) iy = 0;
+                        if (ix >= MAP_W) ix = MAP_W - 1;
+                        if (iy >= MAP_H) iy = MAP_H - 1;
+                        gcol = GRASS_MAP[iy * MAP_W + ix] & 0xFFFFFF;
+                    } else {
+                        // HSV approx fallback
                         float hue =
                             100.0f +
                             (moist - 0.5f) * 10.0f +
-                            (0.5f - temp) * 20.0f; // degrees, 80..140 ~ green range
+                            (0.5f - temp) * 20.0f;
                         if (hue < 80f) hue = 80f;
                         else if (hue > 140f) hue = 140f;
                         float sat =
@@ -308,11 +390,9 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                             0.7f + (temp - 0.5f) * 0.2f + (moist - 0.5f) * 0.1f;
                         if (val < 0.6f) val = 0.6f;
                         else if (val > 0.95f) val = 0.95f;
-
-                        // HSV -> RGB conversion
                         float c = val * sat;
                         float hh = (hue % 360.0f) / 60.0f;
-                        float x = c * (1.0f - Math.abs((hh % 2.0f) - 1.0f));
+                        float xx = c * (1.0f - Math.abs((hh % 2.0f) - 1.0f));
                         float r1 = 0f,
                             g1 = 0f,
                             b1 = 0f;
@@ -320,58 +400,76 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                         switch (sect) {
                             case 0 -> {
                                 r1 = c;
-                                g1 = x;
+                                g1 = xx;
                                 b1 = 0f;
                             }
                             case 1 -> {
-                                r1 = x;
+                                r1 = xx;
                                 g1 = c;
                                 b1 = 0f;
                             }
                             case 2 -> {
                                 r1 = 0f;
                                 g1 = c;
-                                b1 = x;
+                                b1 = xx;
                             }
                             case 3 -> {
                                 r1 = 0f;
-                                g1 = x;
+                                g1 = xx;
                                 b1 = c;
                             }
                             case 4 -> {
-                                r1 = x;
+                                r1 = xx;
                                 g1 = 0f;
                                 b1 = c;
                             }
                             default -> {
                                 r1 = c;
                                 g1 = 0f;
-                                b1 = x;
+                                b1 = xx;
                             }
                         }
                         float m = val - c;
                         int rr = (int) ((r1 + m) * 255.0f + 0.5f);
-                        int gg = (int) ((g1 + m) * 255.0f + 0.5f);
-                        int bb = (int) ((b1 + m) * 255.0f + 0.5f);
+                        int gg2 = (int) ((g1 + m) * 255.0f + 0.5f);
+                        int bb2 = (int) ((b1 + m) * 255.0f + 0.5f);
                         if (rr < 0) rr = 0;
                         else if (rr > 255) rr = 255;
-                        if (gg < 0) gg = 0;
-                        else if (gg > 255) gg = 255;
-                        if (bb < 0) bb = 0;
-                        else if (bb > 255) bb = 255;
-                        col = (rr << 16) | (gg << 8) | bb;
+                        if (gg2 < 0) gg2 = 0;
+                        else if (gg2 > 255) gg2 = 255;
+                        if (bb2 < 0) bb2 = 0;
+                        else if (bb2 > 255) bb2 = 255;
+                        gcol = (rr << 16) | (gg2 << 8) | bb2;
                     }
-                } catch (Throwable t) {
-                    col = 0xFFFFFF;
+
+                    // Foliage color: override > colormap > reuse grass HSV approx
+                    if (foliage.isPresent()) {
+                        fcol = foliage.get();
+                    } else if (FOLIAGE_MAP != null && MAP_W > 0 && MAP_H > 0) {
+                        int ix = (int) (temp * (MAP_W - 1) + 0.5f);
+                        int iy = (int) (moist * (MAP_H - 1) + 0.5f);
+                        if (ix < 0) ix = 0;
+                        if (iy < 0) iy = 0;
+                        if (ix >= MAP_W) ix = MAP_W - 1;
+                        if (iy >= MAP_H) iy = MAP_H - 1;
+                        fcol = FOLIAGE_MAP[iy * MAP_W + ix] & 0xFFFFFF;
+                    } else {
+                        fcol = gcol;
+                    }
+                } catch (Throwable __e) {
+                    // Keep defaults (white) on failure
+                    gcol = 0xFFFFFF;
+                    fcol = 0xFFFFFF;
+                    wcol = 0xFFFFFF;
                 }
 
                 int __idx = j * gx + i;
-                // Legacy combined tint (use grass/foliage approximation)
-                tt[__idx] = col;
-                // Separate grids (grass/foliage use same approximation for now; water kept neutral until translucent phase)
-                tg[__idx] = col;
-                tf[__idx] = col;
-                tw[__idx] = 0xFFFFFF;
+                // Legacy combined tint (use grass)
+                tt[__idx] = gcol;
+                // Separate grids
+                tg[__idx] = gcol;
+                tf[__idx] = fcol;
+                tw[__idx] = wcol;
             }
         }
 
