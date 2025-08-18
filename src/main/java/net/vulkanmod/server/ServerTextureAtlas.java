@@ -183,6 +183,7 @@ public final class ServerTextureAtlas {
         }
 
         // Collect images to include
+
         List<LoadedImage> toPack = new ArrayList<>();
         for (String logicalName : required) {
             BufferedImage img = blockTextures.get(logicalName);
@@ -210,6 +211,14 @@ public final class ServerTextureAtlas {
             unique.putIfAbsent(li.name, li);
         }
 
+        // Ensure explicit fallback tile is always present in atlas
+        unique.putIfAbsent(
+            "minecraft:block/fallback",
+            new LoadedImage(
+                "minecraft:block/fallback",
+                ensureRGBA(fallbackTexture(16, 16))
+            )
+        );
         return buildAtlas(new ArrayList<>(unique.values()));
     }
 
@@ -223,7 +232,7 @@ public final class ServerTextureAtlas {
             blockKey.toLowerCase(Locale.ROOT),
             keyToTexture.get("default")
         );
-        if (textureName == null) textureName = "minecraft:block/stone";
+        if (textureName == null) textureName = "minecraft:block/fallback";
 
         Region r = regionByTexture.get(canonical(textureName));
         if (r == null) {
@@ -634,7 +643,8 @@ public final class ServerTextureAtlas {
         m.put("glass_pane", "minecraft:block/glass");
         m.put("stained_glass_pane", "minecraft:block/glass");
 
-        m.put("default", "minecraft:block/stone");
+        // Use a built-in fallback tile (blue/black checker) for unknown/default keys
+        m.put("default", "minecraft:block/fallback");
         return m;
     }
 
@@ -684,7 +694,7 @@ public final class ServerTextureAtlas {
             h,
             BufferedImage.TYPE_INT_ARGB
         );
-        int c0 = 0xFFFF00FF; // magenta
+        int c0 = 0xFF0000FF; // blue
         int c1 = 0xFF000000; // black
         int size = Math.max(2, Math.min(w, h) / 4);
         for (int y = 0; y < h; y++) {
