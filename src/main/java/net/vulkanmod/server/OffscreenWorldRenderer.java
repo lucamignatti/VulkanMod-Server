@@ -434,7 +434,25 @@ public final class OffscreenWorldRenderer {
         int height,
         int renderDistance
     ) {
+        System.out.println(
+            String.format(
+                "OffscreenWorldRenderer: render called - pos=(%.1f,%.1f,%.1f) rot=(%.1f,%.1f) size=(%dx%d) initialized=%s available=%s",
+                x,
+                y,
+                z,
+                pitch,
+                yaw,
+                width,
+                height,
+                initialized.get(),
+                available.get()
+            )
+        );
+
         if (!initialized.get() || !available.get()) {
+            System.out.println(
+                "OffscreenWorldRenderer: render returning null - not initialized or available"
+            );
             return null;
         }
 
@@ -451,7 +469,7 @@ public final class OffscreenWorldRenderer {
         // ServerLevel unavailable (server not wired yet): we'll return a cleared frame
         if (world == null) {
             System.out.println(
-                "OffscreenWorldRenderer: no ServerLevel (ServerRenderer.server == null) — returning cleared frame"
+                "OffscreenWorldRenderer: no ServerLevel in renderWorldToImage - returning test pattern"
             );
         }
         // Ensure offscreen targets match requested output size (with sane clamps)
@@ -506,6 +524,15 @@ public final class OffscreenWorldRenderer {
                 readbackImageMemory = 0L;
             }
             createReadbackImage();
+
+            System.out.println(
+                String.format(
+                    "OffscreenWorldRenderer: recreated render targets to %dx%d",
+                    reqW,
+                    reqH
+                )
+            );
+
             // Lazy-load texture atlas pixels and create GPU resources (image + sampler + descriptor)
             if (!this.atlasPrepared) {
                 try {
