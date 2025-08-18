@@ -140,7 +140,7 @@ public final class OffscreenWorldRenderer {
     // Configuration
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 360;
-    private static final int COLOR_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    private static final int COLOR_FORMAT = VK_FORMAT_R8G8B8A8_SRGB;
     // A common depth format; in production we should probe for support, but for smoke test this is fine
     private static int DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
 
@@ -2155,7 +2155,7 @@ public final class OffscreenWorldRenderer {
                     height,
                     70.0f,
                     0.1f,
-                    512.0f
+                    2048.0f
                 );
                 ByteBuffer pc = stack.malloc(64);
                 if (TRANSPOSE_MVP_FOR_SHADER) {
@@ -2268,6 +2268,14 @@ public final class OffscreenWorldRenderer {
                         commandBuffer,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                         pipelineTranslucent
+                    );
+                    // Ensure MVP push constants are set for the translucent pass as well
+                    vkCmdPushConstants(
+                        commandBuffer,
+                        pipelineLayout,
+                        VK_SHADER_STAGE_VERTEX_BIT,
+                        0,
+                        pc
                     );
                     // Bind VB/IB for translucent
                     LongBuffer pVBt = stack.mallocLong(1);
@@ -3092,8 +3100,8 @@ public final class OffscreenWorldRenderer {
                         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
                     )
                     .polygonMode(VK_POLYGON_MODE_FILL)
-                    .cullMode(VK_CULL_MODE_BACK_BIT)
-                    .frontFace(VK_FRONT_FACE_CLOCKWISE)
+                    .cullMode(VK_CULL_MODE_NONE)
+                    .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
                     .lineWidth(1.0f)
                     .depthClampEnable(false)
                     .rasterizerDiscardEnable(false);
@@ -3213,7 +3221,7 @@ public final class OffscreenWorldRenderer {
                 .stage(VK_SHADER_STAGE_FRAGMENT_BIT)
                 .module(fragModuleCutout)
                 .pName(stack.ASCII("main"));
-            rs.cullMode(VK_CULL_MODE_NONE);
+            rs.cullMode(VK_CULL_MODE_NONE); // CUTOUT: render both sides (alpha-tested quads like plants/leaves)
             gpc.get(0).pStages(stagesCutout);
             pPipe.rewind();
             int err3 = vkCreateGraphicsPipelines(
@@ -3243,6 +3251,7 @@ public final class OffscreenWorldRenderer {
                 .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
                 .alphaBlendOp(VK_BLEND_OP_ADD);
             ds.depthWriteEnable(false);
+            rs.cullMode(VK_CULL_MODE_NONE);
             VkPipelineShaderStageCreateInfo.Buffer stagesTrans =
                 VkPipelineShaderStageCreateInfo.calloc(2, stack);
             stagesTrans
