@@ -670,9 +670,9 @@ public final class OffscreenWorldRenderer {
                                     .sType(
                                         VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
                                     )
-                                    .magFilter(VK_FILTER_LINEAR)
-                                    .minFilter(VK_FILTER_LINEAR)
-                                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                                    .magFilter(VK_FILTER_NEAREST)
+                                    .minFilter(VK_FILTER_NEAREST)
+                                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
                                     .addressModeU(
                                         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
                                     )
@@ -704,19 +704,7 @@ public final class OffscreenWorldRenderer {
                                     physicalDevice,
                                     props
                                 );
-                                if (avail.samplerAnisotropy()) {
-                                    sci
-                                        .anisotropyEnable(true)
-                                        .maxAnisotropy(
-                                            props
-                                                .limits()
-                                                .maxSamplerAnisotropy()
-                                        );
-                                } else {
-                                    sci
-                                        .anisotropyEnable(false)
-                                        .maxAnisotropy(1.0f);
-                                }
+                                sci.anisotropyEnable(false).maxAnisotropy(1.0f);
                             }
                             int errSp = vkCreateSampler(
                                 device,
@@ -1256,9 +1244,9 @@ public final class OffscreenWorldRenderer {
                         LongBuffer pSampler = st.mallocLong(1);
                         VkSamplerCreateInfo sci = VkSamplerCreateInfo.calloc(st)
                             .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
-                            .magFilter(VK_FILTER_LINEAR)
-                            .minFilter(VK_FILTER_LINEAR)
-                            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                            .magFilter(VK_FILTER_NEAREST)
+                            .minFilter(VK_FILTER_NEAREST)
+                            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
                             .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                             .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                             .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
