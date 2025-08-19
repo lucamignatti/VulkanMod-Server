@@ -103,6 +103,8 @@ public final class ServerTextureAtlas {
     private static final int MAX_TILE_SIZE = 64;
     // Debug: track unique keys we've seen
     private final Set<String> debuggedKeys = ConcurrentHashMap.newKeySet();
+    // Track unique 'key#face' fallback logs to avoid spamming
+    private final Set<String> debuggedFaceKeys = ConcurrentHashMap.newKeySet();
 
     // Mapping: texture logical name -> UV region
     private final Map<String, Region> regionByTexture =
@@ -137,6 +139,8 @@ public final class ServerTextureAtlas {
 
         keyToTexture.put("wood", "minecraft:block/oak_log");
         keyToTexture.put("leaves", "minecraft:block/oak_leaves");
+        keyToTexture.put("pines", "minecraft:block/spruce_leaves");
+        keyToTexture.put("bedrock", "minecraft:block/bedrock");
 
         keyToTexture.put("water", "minecraft:block/water_still"); // sides resolved to flow in face lookup
         keyToTexture.put("glass", "minecraft:block/glass");
@@ -152,6 +156,9 @@ public final class ServerTextureAtlas {
         keyToTexture.put("fern", "minecraft:block/fern");
         keyToTexture.put("dead_bush", "minecraft:block/dead_bush");
         keyToTexture.put("torch", "minecraft:block/torch");
+        // Additional plants / blocks commonly encountered
+        keyToTexture.put("kelp", "minecraft:block/kelp_plant");
+        keyToTexture.put("cactus", "minecraft:block/cactus_side"); // solid block; not cutout
 
         // Ores
         keyToTexture.put("coal", "minecraft:block/coal_ore");
@@ -160,6 +167,45 @@ public final class ServerTextureAtlas {
         keyToTexture.put("diamond", "minecraft:block/diamond_ore");
         keyToTexture.put("redstone", "minecraft:block/redstone_ore");
         keyToTexture.put("lapis", "minecraft:block/lapis_ore");
+
+        // Broader aliases to reduce misses when callers are more specific
+        keyToTexture.put("log", "minecraft:block/oak_log");
+        keyToTexture.put("planks", "minecraft:block/oak_planks");
+
+        // Face-specific mappings for blocks with distinct top/bottom/side textures
+        keyFaceToTexture.put("grass#top", "minecraft:block/grass_block_top");
+        keyFaceToTexture.put("grass#bottom", "minecraft:block/dirt");
+        keyFaceToTexture.put("grass#side", "minecraft:block/grass_block_side");
+
+        keyFaceToTexture.put("wood#top", "minecraft:block/oak_log_top");
+        keyFaceToTexture.put("wood#bottom", "minecraft:block/oak_log_top");
+        keyFaceToTexture.put("wood#side", "minecraft:block/oak_log");
+
+        keyFaceToTexture.put("sandstone#top", "minecraft:block/sandstone_top");
+        keyFaceToTexture.put(
+            "sandstone#bottom",
+            "minecraft:block/sandstone_bottom"
+        );
+        keyFaceToTexture.put("sandstone#side", "minecraft:block/sandstone");
+
+        keyFaceToTexture.put("honey#top", "minecraft:block/honey_block_top");
+        keyFaceToTexture.put(
+            "honey#bottom",
+            "minecraft:block/honey_block_bottom"
+        );
+        keyFaceToTexture.put("honey#side", "minecraft:block/honey_block_side");
+
+        keyFaceToTexture.put("cactus#top", "minecraft:block/cactus_top");
+        keyFaceToTexture.put("cactus#bottom", "minecraft:block/cactus_bottom");
+        keyFaceToTexture.put("cactus#side", "minecraft:block/cactus_side");
+
+        keyFaceToTexture.put("kelp#top", "minecraft:block/kelp_top");
+        keyFaceToTexture.put("kelp#side", "minecraft:block/kelp_plant");
+        keyFaceToTexture.put("kelp#bottom", "minecraft:block/kelp_plant");
+
+        keyFaceToTexture.put("water#top", "minecraft:block/water_still");
+        keyFaceToTexture.put("water#bottom", "minecraft:block/water_still");
+        keyFaceToTexture.put("water#side", "minecraft:block/water_flow");
 
         // Fallback
         keyToTexture.put("default", "minecraft:block/fallback");
@@ -280,7 +326,8 @@ public final class ServerTextureAtlas {
         String k = blockKey.toLowerCase(Locale.ROOT);
 
         // Debug: log each unique key once
-        if (debuggedKeys.add(k)) {
+        boolean __firstForKey = debuggedKeys.add(k);
+        if (__firstForKey) {
             System.out.println(
                 "[ServerTextureAtlas] First request for key: '" + k + "'"
             );
@@ -289,19 +336,105 @@ public final class ServerTextureAtlas {
         // Check simple aliases first
         String aliased = keyToTexture.get(k);
         if (aliased != null) {
-            Region r = regionByTexture.get(canonical(aliased));
+            String cand = canonical(aliased);
+            Region r = regionByTexture.get(cand);
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   alias -> '" +
+                    cand +
+                    "', exists=" +
+                    (r != null)
+                );
+            }
             if (r != null) return r;
+        } else if (__firstForKey) {
+            System.out.println("[ServerTextureAtlas]   alias -> (none)");
         }
 
         // Try direct texture name
-        Region direct = regionByTexture.get(canonical("minecraft:block/" + k));
+        String directName = canonical("minecraft:block/" + k);
+        Region direct = regionByTexture.get(directName);
+        if (__firstForKey) {
+            System.out.println(
+                "[ServerTextureAtlas]   direct -> '" +
+                directName +
+                "', exists=" +
+                (direct != null)
+            );
+        }
         if (direct != null) return direct;
+
+        // Gentle compatibility fallbacks for common/legacy names
+        if ("short_grass".equals(k)) {
+            Region r = regionByTexture.get("minecraft:block/grass");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat short_grass -> 'minecraft:block/grass', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+            r = regionByTexture.get("minecraft:block/tall_grass_top");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat short_grass -> 'minecraft:block/tall_grass_top', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+        } else if ("cactus".equals(k)) {
+            Region r = regionByTexture.get("minecraft:block/cactus_side");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat cactus -> 'minecraft:block/cactus_side', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+        } else if ("kelp".equals(k)) {
+            // Try multiple common kelp names across packs
+            Region r = regionByTexture.get("minecraft:block/kelp_plant");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat kelp -> 'minecraft:block/kelp_plant', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+            r = regionByTexture.get("minecraft:block/kelp_top");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat kelp -> 'minecraft:block/kelp_top', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+            r = regionByTexture.get("block/kelp");
+            if (__firstForKey) {
+                System.out.println(
+                    "[ServerTextureAtlas]   compat kelp -> 'block/kelp', exists=" +
+                    (r != null)
+                );
+            }
+            if (r != null) return r;
+        }
 
         // Fallback
         Region fb = regionByTexture.get("minecraft:block/fallback");
+        if (__firstForKey) {
+            System.out.println(
+                "[ServerTextureAtlas]   fallback -> 'minecraft:block/fallback', exists=" +
+                (fb != null)
+            );
+        }
         if (fb != null) return fb;
 
         // Last resort
+        if (__firstForKey) {
+            System.out.println(
+                "[ServerTextureAtlas]   last-resort -> first available region"
+            );
+        }
         return regionByTexture
             .values()
             .stream()
@@ -319,7 +452,14 @@ public final class ServerTextureAtlas {
                 : faceHint.toLowerCase(java.util.Locale.ROOT));
         String k = blockKey.toLowerCase(java.util.Locale.ROOT);
 
-        // Simple face-specific mappings
+        // 1) Explicit face mapping table (populated in setupKeyAliases / user overrides)
+        String mapped = keyFaceToTexture.get(k + "#" + face);
+        if (mapped != null) {
+            Region r = regionByTexture.get(canonical(mapped));
+            if (r != null) return r;
+        }
+
+        // 2) Built-in face-specific mappings for common blocks
         if ("grass".equals(k)) {
             if ("top".equals(face)) {
                 Region r = regionByTexture.get(
@@ -345,7 +485,13 @@ public final class ServerTextureAtlas {
             }
         }
 
-        // Fallback to block-level resolution
+        // Fallback to block-level resolution; log once if this is a miss for face-specific mapping
+        String __kf = (k + "#" + face);
+        if (debuggedFaceKeys.add(__kf)) {
+            System.out.println(
+                "[ServerTextureAtlas] Face miss; falling back: '" + __kf + "'"
+            );
+        }
         return getRegionForBlockKey(blockKey);
     }
 
@@ -658,6 +804,10 @@ public final class ServerTextureAtlas {
         pinnedNames.add("minecraft:block/honey_block_side");
         pinnedNames.add("minecraft:block/honey_block_top");
         pinnedNames.add("minecraft:block/honey_block_bottom");
+        // Ensure cactus textures are always included and sampled as solid
+        pinnedNames.add("minecraft:block/cactus_side");
+        pinnedNames.add("minecraft:block/cactus_top");
+        pinnedNames.add("minecraft:block/cactus_bottom");
 
         java.util.List<LoadedImage> pinned = new java.util.ArrayList<>();
         java.util.List<LoadedImage> nonPinned = new java.util.ArrayList<>();
@@ -888,10 +1038,11 @@ public final class ServerTextureAtlas {
 
                 // Compute normalized UVs for the content area (exclude bleed).
                 // With 4px padding + full edge bleed and CLAMP_TO_EDGE, no expansion is needed.
-                float u0 = (dstX) / (float) atlasW;
-                float v0 = (dstY) / (float) atlasH;
-                float u1 = (dstX + li.img.getWidth()) / (float) atlasW;
-                float v1 = (dstY + li.img.getHeight()) / (float) atlasH;
+                // Inset by half a texel to avoid sampling padded/transparent border
+                float u0 = (dstX + 0.5f) / (float) atlasW;
+                float v0 = (dstY + 0.5f) / (float) atlasH;
+                float u1 = (dstX + li.img.getWidth() - 0.5f) / (float) atlasW;
+                float v1 = (dstY + li.img.getHeight() - 0.5f) / (float) atlasH;
 
                 this.regionByTexture.put(li.name, new Region(u0, v0, u1, v1));
                 i++;

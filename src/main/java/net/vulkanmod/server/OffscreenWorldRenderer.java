@@ -682,7 +682,7 @@ public final class OffscreenWorldRenderer {
                                     .addressModeW(
                                         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
                                     )
-                                    .maxLod((float) (__mipLevels - 1))
+                                    .maxLod(0.0f)
                                     .minLod(0.0f)
                                     .mipLodBias(0.0f)
                                     .unnormalizedCoordinates(false);
@@ -1250,7 +1250,7 @@ public final class OffscreenWorldRenderer {
                             .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                             .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                             .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                            .maxLod((float) (__mipLevels - 1))
+                            .maxLod(0.0f)
                             .minLod(0.0f)
                             .mipLodBias(0.0f)
                             .unnormalizedCoordinates(false);
@@ -2898,7 +2898,7 @@ public final class OffscreenWorldRenderer {
                 "layout(location=0) out vec4 outColor;\n" +
                 "void main(){\n" +
                 "  vec4 texel = texture(uAtlas, vUV);\n" +
-                "  if (texel.a < 0.5) discard;\n" +
+                "  if (texel.a < 0.1) discard;\n" +
                 "  outColor = vColor * texel;\n" +
                 "}\n";
 

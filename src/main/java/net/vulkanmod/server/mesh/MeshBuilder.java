@@ -662,38 +662,21 @@ public final class MeshBuilder {
             vtx.add(colB);
             vtx.add(colA);
 
-            // uv (2) — choose mapping based on dominant axis of normal
-            float tu, tv;
-            // Determine face by normal
-            if (normal[2] == -1.0f) {
-                // -Z (north)
-                tu = cx;
-                tv = 1.0f - cy;
-            } else if (normal[2] == 1.0f) {
-                // +Z (south)
-                tu = 1.0f - cx;
-                tv = 1.0f - cy;
-            } else if (normal[0] == -1.0f) {
-                // -X (west)
-                tu = cz;
-                tv = 1.0f - cy;
-            } else if (normal[0] == 1.0f) {
-                // +X (east)
-                tu = 1.0f - cz;
-                tv = 1.0f - cy;
-            } else if (normal[1] == 1.0f) {
-                // +Y (top)
-                tu = cx;
-                tv = cz;
+            // UVs: map the unit square directly into the atlas region in vertex order
+            float uu, vv;
+            if (i == 0) {
+                uu = u0;
+                vv = v1;
+            } else if (i == 1) {
+                uu = u1;
+                vv = v1;
+            } else if (i == 2) {
+                uu = u1;
+                vv = v0;
             } else {
-                // -Y (bottom)
-                tu = cx;
-                tv = 1.0f - cz;
+                uu = u0;
+                vv = v0;
             }
-
-            // Remap into atlas region (no rotation; future per-block flow handling)
-            float uu = u0 + tu * du;
-            float vv = v0 + tv * dv;
             vtx.add(uu);
             vtx.add(vv);
         }
@@ -867,6 +850,7 @@ public final class MeshBuilder {
             "fern".equals(s) ||
             "dead_bush".equals(s) ||
             "kelp".equals(s) ||
+            "cactus".equals(s) ||
             "torch".equals(s)
         );
     }

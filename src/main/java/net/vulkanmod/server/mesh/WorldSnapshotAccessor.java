@@ -60,6 +60,9 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private static final byte KEY_TORCH = 24;
     private static final byte KEY_ICE = 25;
     private static final byte KEY_HONEY = 26;
+    private static final byte KEY_CACTUS = 27;
+    private static final byte KEY_PLANKS = 28;
+    private static final byte KEY_BEDROCK = 29;
 
     // Snapshot bounds in world block coordinates (min inclusive, max exclusive)
     private final int minX, minY, minZ;
@@ -210,7 +213,56 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
                     );
 
                     // Key category
-                    key[idx] = classify(block, state);
+                    byte kcode = classify(block, state);
+                    key[idx] = kcode;
+                    // Optional debug: log blocks that fell back to 'default' mapping when enabled via sysprop/env.
+                    {
+                        boolean __log = false;
+                        try {
+                            String sp = System.getProperty(
+                                "vulkanmod.logUnknownBlocks"
+                            );
+                            if (sp != null && !sp.isEmpty()) {
+                                String s = sp
+                                    .trim()
+                                    .toLowerCase(java.util.Locale.ROOT);
+                                if (
+                                    s.equals("1") ||
+                                    s.equals("true") ||
+                                    s.equals("yes") ||
+                                    s.equals("on")
+                                ) __log = true;
+                            }
+                        } catch (Throwable ignored) {}
+                        try {
+                            String ev = System.getenv(
+                                "VULKANMOD_LOG_UNKNOWN_BLOCKS"
+                            );
+                            if (!__log && ev != null && !ev.isEmpty()) {
+                                String s = ev
+                                    .trim()
+                                    .toLowerCase(java.util.Locale.ROOT);
+                                if (
+                                    s.equals("1") ||
+                                    s.equals("true") ||
+                                    s.equals("yes") ||
+                                    s.equals("on")
+                                ) __log = true;
+                            }
+                        } catch (Throwable ignored) {}
+                        if (__log && kcode == KEY_DEFAULT) {
+                            net.minecraft.resources.ResourceLocation rid =
+                                net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+                                    block
+                                );
+                            System.out.println(
+                                "[WorldSnapshotAccessor] Unknown block -> default key mapping: " +
+                                (rid != null
+                                        ? rid.toString()
+                                        : String.valueOf(block))
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -859,6 +911,21 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             block == Blocks.BLUE_ICE
         ) return KEY_ICE;
         if (block == Blocks.HONEY_BLOCK) return KEY_HONEY;
+        if (block == Blocks.CACTUS) return KEY_CACTUS;
+        if (
+            block == Blocks.OAK_PLANKS ||
+            block == Blocks.SPRUCE_PLANKS ||
+            block == Blocks.BIRCH_PLANKS ||
+            block == Blocks.JUNGLE_PLANKS ||
+            block == Blocks.ACACIA_PLANKS ||
+            block == Blocks.DARK_OAK_PLANKS ||
+            block == Blocks.MANGROVE_PLANKS ||
+            block == Blocks.CHERRY_PLANKS ||
+            block == Blocks.BAMBOO_PLANKS ||
+            block == Blocks.CRIMSON_PLANKS ||
+            block == Blocks.WARPED_PLANKS
+        ) return KEY_PLANKS;
+        if (block == Blocks.BEDROCK) return KEY_BEDROCK;
 
         // Flora / non-full blocks (billboard/cutout)
         {
@@ -926,6 +993,9 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
             case KEY_TORCH -> "torch";
             case KEY_ICE -> "ice";
             case KEY_HONEY -> "honey";
+            case KEY_CACTUS -> "cactus";
+            case KEY_PLANKS -> "planks";
+            case KEY_BEDROCK -> "bedrock";
             default -> "default";
         };
     }
@@ -975,6 +1045,7 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     public static boolean isCutoutKeyName(String name) {
         if (name == null) return false;
         String s = name.toLowerCase(java.util.Locale.ROOT);
+        if ("cactus".equals(s)) return true;
         return "leaves".equals(s) || "glass".equals(s);
     }
 
