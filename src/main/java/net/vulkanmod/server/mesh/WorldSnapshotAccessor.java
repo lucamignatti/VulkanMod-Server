@@ -79,6 +79,22 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     private final byte[] sky; // 0..15
     private final byte[] blk; // 0..15
     private final byte[] key; // category key code
+    private String[] blockIds; // namespaced block id per voxel (e.g., "minecraft:stone")
+    // Step B: compact per-voxel properties/connectivity (bitfields/bytes)
+    // Slab type: 0=none, 1=bottom, 2=top, 3=double
+    private byte[] slabType;
+    // Stairs meta bits: 0-1=facing (0=N,1=E,2=S,3=W), 2=half (0=bottom,1=top), 3=shape(0=straight,1=other)
+    private byte[] stairsMeta;
+    // Panes connectivity bitmask: bit0=N, bit1=E, bit2=S, bit3=W
+    private byte[] paneConn;
+    // Fences connectivity bitmask: bit0=N, bit1=E, bit2=S, bit3=W
+    private byte[] fenceConn;
+    // Rails: 0=other/unknown, 1=NORTH_SOUTH, 2=EAST_WEST
+    private byte[] railMeta;
+    // Doors: bits 0-1=facing(0=N,1=E,2=S,3=W), bit2=half(1=upper), bit3=open(1=true)
+    private byte[] doorMeta;
+    // Trapdoors: bits 0-1=facing, bit2=half(1=top), bit3=open(1=true)
+    private byte[] trapdoorMeta;
     // Coarse-grid biome tints (packed 0xRRGGBB) and grid metadata
     // 'tint' retained for backward compatibility (defaults to grass)
     private int[] tint;
@@ -187,6 +203,15 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         byte[] key = new byte[total];
 
         // Iterate region and sample state + light + key
+        String[] blockIds = new String[total];
+        // Step B arrays
+        byte[] slabType = new byte[total];
+        byte[] stairsMeta = new byte[total];
+        byte[] paneConn = new byte[total];
+        byte[] fenceConn = new byte[total];
+        byte[] railMeta = new byte[total];
+        byte[] doorMeta = new byte[total];
+        byte[] trapdoorMeta = new byte[total];
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int y = cMinY; y < cMaxY; y++) {
             for (int z = minZ; z < maxZ; z++) {
@@ -196,6 +221,273 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
 
                     BlockState state = world.getBlockState(pos);
                     Block block = state.getBlock();
+                    // Store canonical namespaced block id (e.g., "minecraft:stone")
+                    {
+                        net.minecraft.resources.ResourceLocation rid =
+                            net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+                                block
+                            );
+                        blockIds[idx] = (rid != null)
+                            ? rid.toString()
+                            : "minecraft:air";
+                    }
+                    // Step B: capture block-family properties/connectivity
+                    // Slab type
+                    if (state.hasProperty(BlockStateProperties.SLAB_TYPE)) {
+                        SlabType t = state.getValue(
+                            BlockStateProperties.SLAB_TYPE
+                        );
+                        slabType[idx] = (byte) (t == SlabType.BOTTOM
+                                ? 1
+                                : (t == SlabType.TOP ? 2 : 3));
+                    } else {
+                        slabType[idx] = 0;
+                    }
+                    // Stairs: facing/half/shape (shape collapsed to straight/non-straight)
+                    {
+                        byte sm = 0;
+                        try {
+                            if (
+                                state.hasProperty(
+                                    BlockStateProperties.HORIZONTAL_FACING
+                                )
+                            ) {
+                                net.minecraft.core.Direction d = state.getValue(
+                                    BlockStateProperties.HORIZONTAL_FACING
+                                );
+                                int f = switch (d) {
+                                    case NORTH -> 0;
+                                    case EAST -> 1;
+                                    case SOUTH -> 2;
+                                    case WEST -> 3;
+                                    default -> 0;
+                                };
+                                sm |= (byte) (f & 0x3);
+                            }
+                            if (state.hasProperty(BlockStateProperties.HALF)) {
+                                var h = state.getValue(
+                                    BlockStateProperties.HALF
+                                );
+                                // Half.TOP means bit2=1
+                                if (
+                                    h ==
+                                    net.minecraft.world.level.block.state.properties.Half.TOP
+                                ) sm |= (1 << 2);
+                            }
+                            // STAIRS_SHAPE may not exist on non-stair blocks; guard with hasProperty
+                            try {
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.STAIRS_SHAPE
+                                    )
+                                ) {
+                                    net.minecraft.world.level.block.state.properties.StairsShape shp =
+                                        state.getValue(
+                                            BlockStateProperties.STAIRS_SHAPE
+                                        );
+                                    if (
+                                        shp !=
+                                        net.minecraft.world.level.block.state.properties.StairsShape.STRAIGHT
+                                    ) {
+                                        sm |= (1 << 3);
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        } catch (Throwable ignored) {}
+                        stairsMeta[idx] = sm;
+                    }
+                    // Panes connectivity (IronBars / stained glass panes)
+                    {
+                        boolean isPane =
+                            (block instanceof
+                                net.minecraft.world.level.block.IronBarsBlock) ||
+                            (block instanceof StainedGlassPaneBlock);
+                        byte pm = 0;
+                        if (isPane) {
+                            if (
+                                state.hasProperty(BlockStateProperties.NORTH) &&
+                                state.getValue(BlockStateProperties.NORTH)
+                            ) pm |= 1;
+                            if (
+                                state.hasProperty(BlockStateProperties.EAST) &&
+                                state.getValue(BlockStateProperties.EAST)
+                            ) pm |= 2;
+                            if (
+                                state.hasProperty(BlockStateProperties.SOUTH) &&
+                                state.getValue(BlockStateProperties.SOUTH)
+                            ) pm |= 4;
+                            if (
+                                state.hasProperty(BlockStateProperties.WEST) &&
+                                state.getValue(BlockStateProperties.WEST)
+                            ) pm |= 8;
+                        }
+                        paneConn[idx] = pm;
+                    }
+                    // Fences connectivity (FenceBlock)
+                    {
+                        boolean isFence =
+                            block instanceof
+                            net.minecraft.world.level.block.FenceBlock;
+                        byte fm = 0;
+                        if (isFence) {
+                            if (
+                                state.hasProperty(BlockStateProperties.NORTH) &&
+                                state.getValue(BlockStateProperties.NORTH)
+                            ) fm |= 1;
+                            if (
+                                state.hasProperty(BlockStateProperties.EAST) &&
+                                state.getValue(BlockStateProperties.EAST)
+                            ) fm |= 2;
+                            if (
+                                state.hasProperty(BlockStateProperties.SOUTH) &&
+                                state.getValue(BlockStateProperties.SOUTH)
+                            ) fm |= 4;
+                            if (
+                                state.hasProperty(BlockStateProperties.WEST) &&
+                                state.getValue(BlockStateProperties.WEST)
+                            ) fm |= 8;
+                        }
+                        fenceConn[idx] = fm;
+                    }
+                    // Rails (orientation via neighbor rail presence; avoids relying on SHAPE property)
+                    {
+                        byte rm = 0;
+                        if (
+                            block instanceof
+                            net.minecraft.world.level.block.BaseRailBlock
+                        ) {
+                            int cx = x,
+                                cy = y,
+                                cz = z;
+                            boolean ns = false,
+                                ew = false;
+                            Block n0 = world
+                                .getBlockState(pos.set(cx, cy, cz - 1))
+                                .getBlock();
+                            ns |= (n0 instanceof
+                                net.minecraft.world.level.block.BaseRailBlock);
+                            Block n1 = world
+                                .getBlockState(pos.set(cx, cy, cz + 1))
+                                .getBlock();
+                            ns |= (n1 instanceof
+                                net.minecraft.world.level.block.BaseRailBlock);
+                            Block e0 = world
+                                .getBlockState(pos.set(cx - 1, cy, cz))
+                                .getBlock();
+                            ew |= (e0 instanceof
+                                net.minecraft.world.level.block.BaseRailBlock);
+                            Block e1 = world
+                                .getBlockState(pos.set(cx + 1, cy, cz))
+                                .getBlock();
+                            ew |= (e1 instanceof
+                                net.minecraft.world.level.block.BaseRailBlock);
+                            pos.set(x, y, z);
+                            if (ns && !ew) rm = 1;
+                            else if (ew && !ns) rm = 2;
+                            else rm = 0;
+                        }
+                        railMeta[idx] = rm;
+                    }
+                    // Doors
+                    {
+                        byte dm = 0;
+                        if (
+                            block instanceof
+                            net.minecraft.world.level.block.DoorBlock
+                        ) {
+                            try {
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.HORIZONTAL_FACING
+                                    )
+                                ) {
+                                    net.minecraft.core.Direction d =
+                                        state.getValue(
+                                            BlockStateProperties.HORIZONTAL_FACING
+                                        );
+                                    int f = switch (d) {
+                                        case NORTH -> 0;
+                                        case EAST -> 1;
+                                        case SOUTH -> 2;
+                                        case WEST -> 3;
+                                        default -> 0;
+                                    };
+                                    dm |= (byte) (f & 0x3);
+                                }
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.DOUBLE_BLOCK_HALF
+                                    )
+                                ) {
+                                    var h = state.getValue(
+                                        BlockStateProperties.DOUBLE_BLOCK_HALF
+                                    );
+                                    if (
+                                        h ==
+                                        net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER
+                                    ) dm |= (1 << 2);
+                                }
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.OPEN
+                                    ) &&
+                                    state.getValue(BlockStateProperties.OPEN)
+                                ) {
+                                    dm |= (1 << 3);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        doorMeta[idx] = dm;
+                    }
+                    // Trapdoors
+                    {
+                        byte tm = 0;
+                        if (
+                            block instanceof
+                            net.minecraft.world.level.block.TrapDoorBlock
+                        ) {
+                            try {
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.HORIZONTAL_FACING
+                                    )
+                                ) {
+                                    net.minecraft.core.Direction d =
+                                        state.getValue(
+                                            BlockStateProperties.HORIZONTAL_FACING
+                                        );
+                                    int f = switch (d) {
+                                        case NORTH -> 0;
+                                        case EAST -> 1;
+                                        case SOUTH -> 2;
+                                        case WEST -> 3;
+                                        default -> 0;
+                                    };
+                                    tm |= (byte) (f & 0x3);
+                                }
+                                if (
+                                    state.hasProperty(BlockStateProperties.HALF)
+                                ) {
+                                    var h = state.getValue(
+                                        BlockStateProperties.HALF
+                                    );
+                                    if (
+                                        h ==
+                                        net.minecraft.world.level.block.state.properties.Half.TOP
+                                    ) tm |= (1 << 2);
+                                }
+                                if (
+                                    state.hasProperty(
+                                        BlockStateProperties.OPEN
+                                    ) &&
+                                    state.getValue(BlockStateProperties.OPEN)
+                                ) {
+                                    tm |= (1 << 3);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        trapdoorMeta[idx] = tm;
+                    }
 
                     // Air/transparent check
                     air[idx] = isAirLike(state, block);
@@ -565,6 +857,15 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         snap.tintW = gx;
         snap.tintH = gz;
 
+        snap.setBlockIdsArray(blockIds);
+        // Step B: attach property/connectivity arrays
+        snap.setSlabTypeArray(slabType);
+        snap.setStairsMetaArray(stairsMeta);
+        snap.setPaneConnArray(paneConn);
+        snap.setFenceConnArray(fenceConn);
+        snap.setRailMetaArray(railMeta);
+        snap.setDoorMetaArray(doorMeta);
+        snap.setTrapdoorMetaArray(trapdoorMeta);
         return snap;
     }
 
@@ -578,6 +879,20 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
     public String getBlockKey(int x, int y, int z) {
         if (!inBounds(x, y, z)) return "default";
         return keyName(key[idxLocal(x, y, z)]);
+    }
+
+    // Internal setter used by capture(...) to attach per-voxel block ids
+    private void setBlockIdsArray(String[] blockIds) {
+        this.blockIds = blockIds;
+    }
+
+    /**
+     * Returns the exact namespaced block id for the block at (x,y,z), e.g., "minecraft:stone".
+     * Returns "minecraft:air" when out of bounds.
+     */
+    public String getBlockId(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return "minecraft:air";
+        return blockIds[idxLocal(x, y, z)];
     }
 
     @Override
@@ -1099,5 +1414,145 @@ public final class WorldSnapshotAccessor implements MeshBuilder.BlockAccessor {
         if (name == null) return false;
         String s = name.toLowerCase(java.util.Locale.ROOT);
         return "water".equals(s) || "ice".equals(s) || "honey".equals(s);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Step B setters (called by capture) and getters for mesher access
+    // --------------------------------------------------------------------------------------------
+
+    // Internal setters to attach arrays after capture
+    private void setSlabTypeArray(byte[] a) {
+        this.slabType = a;
+    }
+
+    private void setStairsMetaArray(byte[] a) {
+        this.stairsMeta = a;
+    }
+
+    private void setPaneConnArray(byte[] a) {
+        this.paneConn = a;
+    }
+
+    private void setFenceConnArray(byte[] a) {
+        this.fenceConn = a;
+    }
+
+    private void setRailMetaArray(byte[] a) {
+        this.railMeta = a;
+    }
+
+    private void setDoorMetaArray(byte[] a) {
+        this.doorMeta = a;
+    }
+
+    private void setTrapdoorMetaArray(byte[] a) {
+        this.trapdoorMeta = a;
+    }
+
+    // Slabs
+    // 0=none, 1=bottom, 2=top, 3=double
+    public byte getSlabType(int x, int y, int z) {
+        if (!inBounds(x, y, z) || slabType == null) return 0;
+        return slabType[idxLocal(x, y, z)];
+    }
+
+    // Stairs
+    // Facing: 0=N,1=E,2=S,3=W
+    public byte getStairFacing(int x, int y, int z) {
+        if (!inBounds(x, y, z) || stairsMeta == null) return 0;
+        return (byte) (stairsMeta[idxLocal(x, y, z)] & 0x3);
+    }
+
+    // Half: 0=bottom,1=top
+    public byte getStairHalf(int x, int y, int z) {
+        if (!inBounds(x, y, z) || stairsMeta == null) return 0;
+        return (byte) (((stairsMeta[idxLocal(x, y, z)] >> 2) & 0x1));
+    }
+
+    // Shape: 0=straight,1=other
+    public byte getStairShape(int x, int y, int z) {
+        if (!inBounds(x, y, z) || stairsMeta == null) return 0;
+        return (byte) (((stairsMeta[idxLocal(x, y, z)] >> 3) & 0x1));
+    }
+
+    // Panes connectivity
+    public boolean isPaneConnectedN(int x, int y, int z) {
+        if (!inBounds(x, y, z) || paneConn == null) return false;
+        return (paneConn[idxLocal(x, y, z)] & 1) != 0;
+    }
+
+    public boolean isPaneConnectedE(int x, int y, int z) {
+        if (!inBounds(x, y, z) || paneConn == null) return false;
+        return (paneConn[idxLocal(x, y, z)] & 2) != 0;
+    }
+
+    public boolean isPaneConnectedS(int x, int y, int z) {
+        if (!inBounds(x, y, z) || paneConn == null) return false;
+        return (paneConn[idxLocal(x, y, z)] & 4) != 0;
+    }
+
+    public boolean isPaneConnectedW(int x, int y, int z) {
+        if (!inBounds(x, y, z) || paneConn == null) return false;
+        return (paneConn[idxLocal(x, y, z)] & 8) != 0;
+    }
+
+    // Fences connectivity
+    public boolean isFenceConnectedN(int x, int y, int z) {
+        if (!inBounds(x, y, z) || fenceConn == null) return false;
+        return (fenceConn[idxLocal(x, y, z)] & 1) != 0;
+    }
+
+    public boolean isFenceConnectedE(int x, int y, int z) {
+        if (!inBounds(x, y, z) || fenceConn == null) return false;
+        return (fenceConn[idxLocal(x, y, z)] & 2) != 0;
+    }
+
+    public boolean isFenceConnectedS(int x, int y, int z) {
+        if (!inBounds(x, y, z) || fenceConn == null) return false;
+        return (fenceConn[idxLocal(x, y, z)] & 4) != 0;
+    }
+
+    public boolean isFenceConnectedW(int x, int y, int z) {
+        if (!inBounds(x, y, z) || fenceConn == null) return false;
+        return (fenceConn[idxLocal(x, y, z)] & 8) != 0;
+    }
+
+    // Rails
+    // 0=other,1=NS,2=EW
+    public byte getRailShape(int x, int y, int z) {
+        if (!inBounds(x, y, z) || railMeta == null) return 0;
+        return railMeta[idxLocal(x, y, z)];
+    }
+
+    // Doors
+    public byte getDoorFacing(int x, int y, int z) {
+        if (!inBounds(x, y, z) || doorMeta == null) return 0;
+        return (byte) (doorMeta[idxLocal(x, y, z)] & 0x3);
+    }
+
+    public boolean isDoorUpperHalf(int x, int y, int z) {
+        if (!inBounds(x, y, z) || doorMeta == null) return false;
+        return ((doorMeta[idxLocal(x, y, z)] >> 2) & 0x1) != 0;
+    }
+
+    public boolean isDoorOpen(int x, int y, int z) {
+        if (!inBounds(x, y, z) || doorMeta == null) return false;
+        return ((doorMeta[idxLocal(x, y, z)] >> 3) & 0x1) != 0;
+    }
+
+    // Trapdoors
+    public byte getTrapdoorFacing(int x, int y, int z) {
+        if (!inBounds(x, y, z) || trapdoorMeta == null) return 0;
+        return (byte) (trapdoorMeta[idxLocal(x, y, z)] & 0x3);
+    }
+
+    public boolean isTrapdoorTopHalf(int x, int y, int z) {
+        if (!inBounds(x, y, z) || trapdoorMeta == null) return false;
+        return ((trapdoorMeta[idxLocal(x, y, z)] >> 2) & 0x1) != 0;
+    }
+
+    public boolean isTrapdoorOpen(int x, int y, int z) {
+        if (!inBounds(x, y, z) || trapdoorMeta == null) return false;
+        return ((trapdoorMeta[idxLocal(x, y, z)] >> 3) & 0x1) != 0;
     }
 }

@@ -115,6 +115,9 @@ public final class ServerTextureAtlas {
     private final Map<String, String> keyFaceToTexture =
         new ConcurrentHashMap<>();
 
+    // Pack-driven model/blockstate index (populated during load to enable blockId lookups)
+    private volatile net.vulkanmod.server.pack.PackIndex packIndex;
+
     // List of texture logical names required for our current categories
 
     private ServerTextureAtlas() {
@@ -244,6 +247,17 @@ public final class ServerTextureAtlas {
             // still proceed with fallback-only atlas so renderer doesn't crash
         }
 
+        // Build pack index to resolve models/blockstates and prefetch referenced textures
+        try {
+            this.packIndex = new net.vulkanmod.server.pack.PackIndex();
+            this.packIndex.loadFromZip(zipPath);
+        } catch (Throwable t) {
+            System.err.println(
+                "[ServerTextureAtlas] PackIndex load failed: " + t
+            );
+            this.packIndex = null;
+        }
+
         // Collect all discovered block textures into the atlas (dedup by canonical logical name)
         Map<String, LoadedImage> unique = new LinkedHashMap<>();
         for (Map.Entry<String, BufferedImage> e : blockTextures.entrySet()) {
@@ -281,6 +295,37 @@ public final class ServerTextureAtlas {
                 img = scaled;
             }
             unique.putIfAbsent(logicalName, new LoadedImage(logicalName, img));
+        }
+
+        // Include all model-referenced textures from PackIndex (if available)
+        if (this.packIndex != null) {
+            java.util.Set<String> refs =
+                this.packIndex.collectAllReferencedTextures();
+            for (String name : refs) {
+                String cand = canonical(name);
+                BufferedImage img = blockTextures.get(cand);
+                if (img == null) {
+                    String stripped = stripNamespace(cand);
+                    img = blockTextures.get(stripped);
+                    if (img == null && stripped.indexOf('/') < 0) {
+                        img = blockTextures.get("minecraft:block/" + stripped);
+                        if (img == null) img = blockTextures.get(
+                            "block/" + stripped
+                        );
+                    }
+                }
+                if (img != null) {
+                    unique.putIfAbsent(
+                        cand,
+                        new LoadedImage(cand, ensureRGBA(img))
+                    );
+                } else {
+                    System.out.println(
+                        "[ServerTextureAtlas] Missing referenced texture: " +
+                        cand
+                    );
+                }
+            }
         }
 
         // Ensure explicit fallback tile is always present in atlas
@@ -1225,6 +1270,16 @@ public final class ServerTextureAtlas {
                 );
                 // still proceed with fallback-only atlas so renderer doesn't crash
             }
+            // Build pack index to resolve models/blockstates and prefetch referenced textures
+            try {
+                this.packIndex = new net.vulkanmod.server.pack.PackIndex();
+                this.packIndex.loadFromDir(packPath);
+            } catch (Throwable t) {
+                System.err.println(
+                    "[ServerTextureAtlas] PackIndex load failed: " + t
+                );
+                this.packIndex = null;
+            }
             Map<String, LoadedImage> unique = new LinkedHashMap<>();
             for (Map.Entry<
                 String,
@@ -1237,6 +1292,39 @@ public final class ServerTextureAtlas {
                     new LoadedImage(logicalName, img)
                 );
             }
+            // Include all model-referenced textures from PackIndex (if available)
+            if (this.packIndex != null) {
+                java.util.Set<String> refs =
+                    this.packIndex.collectAllReferencedTextures();
+                for (String name : refs) {
+                    String cand = canonical(name);
+                    BufferedImage img = blockTextures.get(cand);
+                    if (img == null) {
+                        String stripped = stripNamespace(cand);
+                        img = blockTextures.get(stripped);
+                        if (img == null && stripped.indexOf('/') < 0) {
+                            img = blockTextures.get(
+                                "minecraft:block/" + stripped
+                            );
+                            if (img == null) img = blockTextures.get(
+                                "block/" + stripped
+                            );
+                        }
+                    }
+                    if (img != null) {
+                        unique.putIfAbsent(
+                            cand,
+                            new LoadedImage(cand, ensureRGBA(img))
+                        );
+                    } else {
+                        System.out.println(
+                            "[ServerTextureAtlas] Missing referenced texture: " +
+                            cand
+                        );
+                    }
+                }
+            }
+
             // Ensure explicit fallback tile is always present in atlas
             unique.putIfAbsent(
                 "minecraft:block/fallback",
@@ -1433,6 +1521,122 @@ public final class ServerTextureAtlas {
             }
         }
         return r;
+    }
+
+    /**
+     * Resolve a UV region by exact blockId using resource-pack models and blockstates.
+     * faceHint can be "top","bottom","north","south","west","east","side" (defaults to "side").
+     * Falls back to category-key lookup when model resolution is unavailable.
+     */
+    public Region getRegionForBlockFaceByBlockId(
+        String blockId,
+        String faceHint
+    ) {
+        ensureLoaded();
+        if (blockId != null && this.packIndex != null) {
+            var opt = this.packIndex.get(blockId);
+            if (opt.isPresent()) {
+                net.vulkanmod.server.pack.ResolvedModel rm = opt.get();
+                String face = (faceHint == null
+                        ? "side"
+                        : faceHint.toLowerCase(java.util.Locale.ROOT));
+                String logicalName = null;
+
+                switch (rm.getRenderType()) {
+                    case BILLBOARD_CROSS, BILLBOARD_CROSS_TINTED -> {
+                        logicalName = rm.getCrossSprite();
+                    }
+                    case WATER -> {
+                        logicalName = "side".equals(face)
+                            ? "minecraft:block/water_flow"
+                            : "minecraft:block/water_still";
+                    }
+                    default -> {
+                        net.vulkanmod.server.pack.ResolvedModel.Face f =
+                            switch (face) {
+                                case "top" -> net.vulkanmod.server.pack.ResolvedModel.Face.TOP;
+                                case "bottom" -> net.vulkanmod.server.pack.ResolvedModel.Face.BOTTOM;
+                                case
+                                    "north",
+                                    "side" -> net.vulkanmod.server.pack.ResolvedModel.Face.NORTH;
+                                case "south" -> net.vulkanmod.server.pack.ResolvedModel.Face.SOUTH;
+                                case "west" -> net.vulkanmod.server.pack.ResolvedModel.Face.WEST;
+                                case "east" -> net.vulkanmod.server.pack.ResolvedModel.Face.EAST;
+                                default -> net.vulkanmod.server.pack.ResolvedModel.Face.NORTH;
+                            };
+                        logicalName = rm.getFaceTexture(f);
+                    }
+                }
+
+                if (logicalName != null) {
+                    Region r = getRegionByLogicalName(logicalName);
+                    if (r != null) return r;
+                }
+            }
+        }
+        // Fallback to category-key approach with heuristics to reduce checkerboards when PackIndex misses
+        {
+            String bid = stripNamespace(
+                blockId == null ? "default" : blockId
+            ).toLowerCase(java.util.Locale.ROOT);
+            String face = (faceHint == null
+                    ? "side"
+                    : faceHint.toLowerCase(java.util.Locale.ROOT));
+            String keyCompat = null;
+
+            if ("grass_block".equals(bid)) keyCompat = "grass";
+            else if (bid.endsWith("_log")) keyCompat = "wood";
+            else if (bid.endsWith("_wood")) keyCompat = "wood";
+            else if (bid.endsWith("_leaves")) keyCompat = "leaves";
+            else if ("water".equals(bid) || bid.endsWith("_water")) keyCompat =
+                "water";
+            else if (
+                bid.endsWith("_glass") || bid.endsWith("_glass_pane")
+            ) keyCompat = "glass";
+            else if (bid.endsWith("_pane")) keyCompat = "glass";
+            else if (bid.endsWith("_planks")) keyCompat = "planks";
+            else if (
+                "stone".equals(bid) ||
+                bid.endsWith("_stone") ||
+                bid.endsWith("_stone_bricks")
+            ) keyCompat = "stone";
+            else if (
+                "sand".equals(bid) ||
+                bid.endsWith("_sand") ||
+                bid.endsWith("_sandstone")
+            ) keyCompat = "sandstone";
+            else if (bid.contains("rail")) keyCompat = "rail";
+            else if (bid.endsWith("_door")) keyCompat = "door";
+            else if (bid.endsWith("_trapdoor")) keyCompat = "trapdoor";
+            else if (
+                bid.endsWith("_fence") || bid.endsWith("_fence_gate")
+            ) keyCompat = "planks";
+            else if (bid.endsWith("_slab")) keyCompat = "planks";
+            else if (bid.endsWith("_stairs")) keyCompat = "planks";
+            else if ("cactus".equals(bid)) keyCompat = "cactus";
+            else if (bid.contains("ice")) keyCompat = "ice";
+            else if (bid.contains("honey")) keyCompat = "honey";
+
+            if (keyCompat != null) {
+                return getRegionForBlockFace(keyCompat, face);
+            }
+            return getRegionForBlockFace(bid, face);
+        }
+    }
+
+    /**
+     * Return the render type for a blockId based on resolved model; defaults to SOLID.
+     */
+    public net.vulkanmod.server.pack.RenderType getRenderTypeForBlockId(
+        String blockId
+    ) {
+        if (blockId != null && this.packIndex != null) {
+            var opt = this.packIndex.get(blockId);
+            if (opt.isPresent()) {
+                return opt.get().getRenderType();
+            }
+        }
+        return net.vulkanmod.server.pack.RenderType.SOLID;
     }
 
     // Convenience: load the newest .zip from <gameDir>/resourcepacks if present

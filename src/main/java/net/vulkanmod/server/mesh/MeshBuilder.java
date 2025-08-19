@@ -691,6 +691,423 @@ public final class MeshBuilder {
         idx.add(baseIndex + 3);
     }
 
+    // Helper: emit axis-aligned cuboid within a block, with per-face UVs and lighting
+    // min/max are relative to the block cell [0..1] range in each axis
+    private void emitCuboid(
+        GrowableFloatArray vtx,
+        GrowableIntArray idx,
+        int bx,
+        int by,
+        int bz,
+        float minX,
+        float minY,
+        float minZ,
+        float maxX,
+        float maxY,
+        float maxZ,
+        ServerTextureAtlas.Region top,
+        ServerTextureAtlas.Region bottom,
+        ServerTextureAtlas.Region north,
+        ServerTextureAtlas.Region south,
+        ServerTextureAtlas.Region west,
+        ServerTextureAtlas.Region east,
+        BlockAccessor acc,
+        float[] baseColor
+    ) {
+        final float[] nrm = new float[3];
+        final float[] col = new float[4];
+
+        // North (-Z)
+        if (north != null) {
+            set3(nrm, 0, 0, -1);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(north.u0);
+            vtx.add(north.v1);
+            // v1
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(north.u1);
+            vtx.add(north.v1);
+            // v2
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(north.u1);
+            vtx.add(north.v0);
+            // v3
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(north.u0);
+            vtx.add(north.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+
+        // South (+Z)
+        if (south != null) {
+            set3(nrm, 0, 0, 1);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(south.u0);
+            vtx.add(south.v1);
+            // v1
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(south.u1);
+            vtx.add(south.v1);
+            // v2
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(south.u1);
+            vtx.add(south.v0);
+            // v3
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(south.u0);
+            vtx.add(south.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+
+        // West (-X)
+        if (west != null) {
+            set3(nrm, -1, 0, 0);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(west.u0);
+            vtx.add(west.v1);
+            // v1
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(west.u1);
+            vtx.add(west.v1);
+            // v2
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(west.u1);
+            vtx.add(west.v0);
+            // v3
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(west.u0);
+            vtx.add(west.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+
+        // East (+X)
+        if (east != null) {
+            set3(nrm, 1, 0, 0);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(east.u0);
+            vtx.add(east.v1);
+            // v1
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(east.u1);
+            vtx.add(east.v1);
+            // v2
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(east.u1);
+            vtx.add(east.v0);
+            // v3
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(east.u0);
+            vtx.add(east.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+
+        // Top (+Y)
+        if (top != null) {
+            set3(nrm, 0, 1, 0);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(top.u0);
+            vtx.add(top.v1);
+            // v1
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(top.u1);
+            vtx.add(top.v1);
+            // v2
+            vtx.add(bx + maxX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(top.u1);
+            vtx.add(top.v0);
+            // v3
+            vtx.add(bx + minX);
+            vtx.add(by + maxY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(top.u0);
+            vtx.add(top.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+
+        // Bottom (-Y)
+        if (bottom != null) {
+            set3(nrm, 0, -1, 0);
+            float[] c = applyLighting(acc, bx, by, bz, nrm, baseColor, col);
+            int baseIndex = vtx.countVertices();
+            // v0
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(bottom.u0);
+            vtx.add(bottom.v1);
+            // v1
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + maxZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(bottom.u1);
+            vtx.add(bottom.v1);
+            // v2
+            vtx.add(bx + maxX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(bottom.u1);
+            vtx.add(bottom.v0);
+            // v3
+            vtx.add(bx + minX);
+            vtx.add(by + minY);
+            vtx.add(bz + minZ);
+            vtx.add(nrm[0]);
+            vtx.add(nrm[1]);
+            vtx.add(nrm[2]);
+            vtx.add(c[0]);
+            vtx.add(c[1]);
+            vtx.add(c[2]);
+            vtx.add(c[3]);
+            vtx.add(bottom.u0);
+            vtx.add(bottom.v0);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 1);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 0);
+            idx.add(baseIndex + 2);
+            idx.add(baseIndex + 3);
+        }
+    }
+
     // =============================================================================================
     // Lighting and Color
     // =============================================================================================
@@ -891,12 +1308,12 @@ public final class MeshBuilder {
         float maxYf = maxY;
         float maxZf = endZ;
 
-        GrowableFloatArray vtxSolid = new GrowableFloatArray(1 << 18);
-        GrowableIntArray idxSolid = new GrowableIntArray(1 << 18);
-        GrowableFloatArray vtxCutout = new GrowableFloatArray(1 << 16);
-        GrowableIntArray idxCutout = new GrowableIntArray(1 << 16);
-        GrowableFloatArray vtxTranslucent = new GrowableFloatArray(1 << 16);
-        GrowableIntArray idxTranslucent = new GrowableIntArray(1 << 16);
+        GrowableFloatArray vtxSolid = new GrowableFloatArray(1 << 20);
+        GrowableIntArray idxSolid = new GrowableIntArray(1 << 21);
+        GrowableFloatArray vtxCutout = new GrowableFloatArray(1 << 18);
+        GrowableIntArray idxCutout = new GrowableIntArray(1 << 19);
+        GrowableFloatArray vtxTranslucent = new GrowableFloatArray(1 << 18);
+        GrowableIntArray idxTranslucent = new GrowableIntArray(1 << 19);
 
         // local caches
         final float[] baseColor = new float[4];
@@ -908,24 +1325,30 @@ public final class MeshBuilder {
             for (int z = startZ; z < endZ; z++) {
                 for (int x = startX; x < endX; x++) {
                     String key = safeKey(acc.getBlockKey(x, y, z));
+                    String __blockId = (acc instanceof WorldSnapshotAccessor ws)
+                        ? ws.getBlockId(x, y, z)
+                        : null;
+                    net.vulkanmod.server.pack.RenderType __rtype =
+                        net.vulkanmod.server.ServerTextureAtlas.getInstance().getRenderTypeForBlockId(
+                            __blockId
+                        );
                     float[] lutColor = cfg.colorLUT.getOrDefault(
                         key,
                         cfg.defaultColor
                     );
                     System.arraycopy(lutColor, 0, baseColor, 0, 4);
 
-                    // Billboard-style cutouts (flora/torch/kelp): emit crossed quads into CUTOUT and continue
+                    // Billboard-style cutouts (resource-pack driven): emit crossed quads into CUTOUT and continue
                     if (
-                        "short_grass".equals(key) ||
-                        "tall_grass".equals(key) ||
-                        "fern".equals(key) ||
-                        "dead_bush".equals(key) ||
-                        "kelp".equals(key) ||
-                        "torch".equals(key)
+                        __rtype ==
+                            net.vulkanmod.server.pack.RenderType.BILLBOARD_CROSS ||
+                        __rtype ==
+                        net.vulkanmod.server.pack.RenderType.BILLBOARD_CROSS_TINTED
                     ) {
                         ServerTextureAtlas.Region __uvbb =
-                            ServerTextureAtlas.getInstance().getRegionForBlockKey(
-                                key
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                null
                             );
                         float bu0 = __uvbb.u0,
                             bv0 = __uvbb.v0,
@@ -934,9 +1357,13 @@ public final class MeshBuilder {
 
                         // Billboard lighting: neutral (no directional shading and no AO) to avoid over-darkening
                         set3(nrm, 0, 1, 0);
-                        // Apply biome grass tint to billboard flora
+                        // Apply biome tint only for tinted_cross models
                         float[] baseTintBB = baseColor;
-                        if (acc instanceof WorldSnapshotAccessor wsBB) {
+                        if (
+                            __rtype ==
+                                net.vulkanmod.server.pack.RenderType.BILLBOARD_CROSS_TINTED &&
+                            acc instanceof WorldSnapshotAccessor wsBB
+                        ) {
                             int rgbBB = wsBB.getGrassTintRGB(x, y, z);
                             float trBB = ((rgbBB >> 16) & 0xFF) / 255.0f;
                             float tgBB = ((rgbBB >> 8) & 0xFF) / 255.0f;
@@ -1089,8 +1516,769 @@ public final class MeshBuilder {
                         continue;
                     }
 
-                    boolean translucent = isTranslucentKey(key);
+                    boolean translucent =
+                        (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.WATER ||
+                            __rtype ==
+                            net.vulkanmod.server.pack.RenderType.TRANSLUCENT) ||
+                        (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.SOLID &&
+                            isTranslucentKey(key));
                     if (!translucent && acc.isAir(x, y, z)) continue;
+
+                    // Step B geometry: slabs
+                    if (acc instanceof WorldSnapshotAccessor wsB) {
+                        byte slabT = wsB.getSlabType(x, y, z);
+                        if (slabT == 1 || slabT == 2) {
+                            boolean cutoutL = (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.CUTOUT);
+                            GrowableFloatArray vtx = cutoutL
+                                ? vtxCutout
+                                : vtxSolid;
+                            GrowableIntArray idx = cutoutL
+                                ? idxCutout
+                                : idxSolid;
+
+                            float sMinY = (slabT == 1) ? 0.0f : 0.5f;
+                            float sMaxY = (slabT == 1) ? 0.5f : 1.0f;
+
+                            ServerTextureAtlas atlas =
+                                ServerTextureAtlas.getInstance();
+                            ServerTextureAtlas.Region rTop =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "top"
+                                );
+                            ServerTextureAtlas.Region rBottom =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "bottom"
+                                );
+                            ServerTextureAtlas.Region rSide =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "side"
+                                );
+
+                            emitCuboid(
+                                vtx,
+                                idx,
+                                x,
+                                y,
+                                z,
+                                0.0f,
+                                sMinY,
+                                0.0f,
+                                1.0f,
+                                sMaxY,
+                                1.0f,
+                                rTop,
+                                rBottom,
+                                rSide,
+                                rSide,
+                                rSide,
+                                rSide,
+                                acc,
+                                baseColor
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Step B geometry: straight stairs (approximate L-shape)
+                    if (acc instanceof WorldSnapshotAccessor wsS) {
+                        byte shape = wsS.getStairShape(x, y, z);
+                        if (shape != 0) {
+                            String k = "vulkanmod.loggedStairsNonStraight";
+                            if (!"1".equals(System.getProperty(k))) {
+                                System.out.println(
+                                    "[MeshBuilder] Stairs shape INNER/OUTER not implemented; falling back to STRAIGHT."
+                                );
+                                System.setProperty(k, "1");
+                            }
+                        }
+                        // Heuristic: detect stairs by presence of facing/half meta when no slab meta
+                        byte slabT = wsS.getSlabType(x, y, z);
+                        if (
+                            (__blockId != null &&
+                                __blockId.endsWith("_stairs")) &&
+                            slabT == 0
+                        ) {
+                            boolean cutoutL = (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.CUTOUT);
+                            GrowableFloatArray vtx = cutoutL
+                                ? vtxCutout
+                                : vtxSolid;
+                            GrowableIntArray idx = cutoutL
+                                ? idxCutout
+                                : idxSolid;
+
+                            byte facing = wsS.getStairFacing(x, y, z); // 0=N,1=E,2=S,3=W
+                            byte half = wsS.getStairHalf(x, y, z); // 0=bottom,1=top
+
+                            float y0 = (half == 0) ? 0.0f : 0.5f;
+                            float y1 = (half == 0) ? 0.5f : 1.0f;
+
+                            ServerTextureAtlas atlas =
+                                ServerTextureAtlas.getInstance();
+                            ServerTextureAtlas.Region rTop =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "top"
+                                );
+                            ServerTextureAtlas.Region rBottom =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "bottom"
+                                );
+                            ServerTextureAtlas.Region rSide =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "side"
+                                );
+
+                            // Lower/upper slab across full footprint
+                            emitCuboid(
+                                vtx,
+                                idx,
+                                x,
+                                y,
+                                z,
+                                0.0f,
+                                y0,
+                                0.0f,
+                                1.0f,
+                                y1,
+                                1.0f,
+                                rTop,
+                                rBottom,
+                                rSide,
+                                rSide,
+                                rSide,
+                                rSide,
+                                acc,
+                                baseColor
+                            );
+
+                            // Back half riser: depends on facing, occupies other half height
+                            float minX2 = 0f,
+                                maxX2 = 1f,
+                                minZ2 = 0f,
+                                maxZ2 = 1f;
+                            if (facing == 0) {
+                                // NORTH: back is south half (z 0.5..1)
+                                minZ2 = 0.5f;
+                                maxZ2 = 1.0f;
+                            } else if (facing == 2) {
+                                // SOUTH: back is north half (z 0..0.5)
+                                minZ2 = 0.0f;
+                                maxZ2 = 0.5f;
+                            } else if (facing == 1) {
+                                // EAST: back is west half (x 0..0.5)
+                                minX2 = 0.0f;
+                                maxX2 = 0.5f;
+                            } else {
+                                // WEST: back is east half (x 0.5..1)
+                                minX2 = 0.5f;
+                                maxX2 = 1.0f;
+                            }
+                            float ry0 = (half == 0) ? 0.5f : 0.0f;
+                            float ry1 = (half == 0) ? 1.0f : 0.5f;
+
+                            emitCuboid(
+                                vtx,
+                                idx,
+                                x,
+                                y,
+                                z,
+                                minX2,
+                                ry0,
+                                minZ2,
+                                maxX2,
+                                ry1,
+                                maxZ2,
+                                rTop,
+                                rBottom,
+                                rSide,
+                                rSide,
+                                rSide,
+                                rSide,
+                                acc,
+                                baseColor
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Step B geometry: panes (glass panes/iron bars)
+                    if (acc instanceof WorldSnapshotAccessor wsP) {
+                        boolean isPane =
+                            wsP.isPaneConnectedN(x, y, z) ||
+                            wsP.isPaneConnectedE(x, y, z) ||
+                            wsP.isPaneConnectedS(x, y, z) ||
+                            wsP.isPaneConnectedW(x, y, z);
+                        // Also render isolated post (no connections)
+                        if (
+                            __blockId != null &&
+                            (__blockId.endsWith("_glass_pane") ||
+                                __blockId.endsWith("iron_bars"))
+                        ) {
+                            GrowableFloatArray vtx = vtxCutout;
+                            GrowableIntArray idx = idxCutout;
+                            ServerTextureAtlas atlas =
+                                ServerTextureAtlas.getInstance();
+                            ServerTextureAtlas.Region rTop =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "top"
+                                );
+                            ServerTextureAtlas.Region rBottom =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "bottom"
+                                );
+                            ServerTextureAtlas.Region rSide =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "side"
+                                );
+
+                            float t = 0.125f;
+                            float c0 = 0.5f - t * 0.5f;
+                            float c1 = 0.5f + t * 0.5f;
+
+                            // Center post
+                            emitCuboid(
+                                vtx,
+                                idx,
+                                x,
+                                y,
+                                z,
+                                c0,
+                                0.0f,
+                                c0,
+                                c1,
+                                1.0f,
+                                c1,
+                                rTop,
+                                rBottom,
+                                rSide,
+                                rSide,
+                                rSide,
+                                rSide,
+                                acc,
+                                baseColor
+                            );
+
+                            // Arms based on connectivity
+                            if (wsP.isPaneConnectedN(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    c0,
+                                    0.0f,
+                                    0.0f,
+                                    c1,
+                                    1.0f,
+                                    c0,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsP.isPaneConnectedS(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    c0,
+                                    0.0f,
+                                    c1,
+                                    c1,
+                                    1.0f,
+                                    1.0f,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsP.isPaneConnectedW(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    0.0f,
+                                    0.0f,
+                                    c0,
+                                    c0,
+                                    1.0f,
+                                    c1,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsP.isPaneConnectedE(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    c1,
+                                    0.0f,
+                                    c0,
+                                    1.0f,
+                                    1.0f,
+                                    c1,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            // Do not continue; panes should not fallback to cube
+                            continue;
+                        }
+                    }
+
+                    // Step B geometry: fences
+                    if (acc instanceof WorldSnapshotAccessor wsF) {
+                        boolean connected =
+                            wsF.isFenceConnectedN(x, y, z) ||
+                            wsF.isFenceConnectedE(x, y, z) ||
+                            wsF.isFenceConnectedS(x, y, z) ||
+                            wsF.isFenceConnectedW(x, y, z);
+                        if (connected) {
+                            GrowableFloatArray vtx = vtxCutout;
+                            GrowableIntArray idx = idxCutout;
+                            ServerTextureAtlas atlas =
+                                ServerTextureAtlas.getInstance();
+                            ServerTextureAtlas.Region rTop =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "top"
+                                );
+                            ServerTextureAtlas.Region rBottom =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "bottom"
+                                );
+                            ServerTextureAtlas.Region rSide =
+                                atlas.getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "side"
+                                );
+
+                            float post = 0.25f;
+                            float p0 = 0.5f - post * 0.5f;
+                            float p1 = 0.5f + post * 0.5f;
+
+                            // Center post
+                            emitCuboid(
+                                vtx,
+                                idx,
+                                x,
+                                y,
+                                z,
+                                p0,
+                                0.0f,
+                                p0,
+                                p1,
+                                1.0f,
+                                p1,
+                                rTop,
+                                rBottom,
+                                rSide,
+                                rSide,
+                                rSide,
+                                rSide,
+                                acc,
+                                baseColor
+                            );
+
+                            float railT = 0.1875f;
+                            float ry0 = 0.375f;
+                            float ry1 = 0.625f;
+
+                            if (wsF.isFenceConnectedN(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    p0,
+                                    ry0,
+                                    0.0f,
+                                    p1,
+                                    ry1,
+                                    p0,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsF.isFenceConnectedS(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    p0,
+                                    ry0,
+                                    p1,
+                                    p1,
+                                    ry1,
+                                    1.0f,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsF.isFenceConnectedW(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    0.0f,
+                                    ry0,
+                                    p0,
+                                    p0,
+                                    ry1,
+                                    p1,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            if (wsF.isFenceConnectedE(x, y, z)) {
+                                emitCuboid(
+                                    vtx,
+                                    idx,
+                                    x,
+                                    y,
+                                    z,
+                                    p1,
+                                    ry0,
+                                    p0,
+                                    1.0f,
+                                    ry1,
+                                    p1,
+                                    rTop,
+                                    rBottom,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    rSide,
+                                    acc,
+                                    baseColor
+                                );
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Step B geometry: doors (closed)
+                    if (
+                        acc instanceof WorldSnapshotAccessor wsD &&
+                        __blockId != null &&
+                        __blockId.endsWith("_door")
+                    ) {
+                        boolean isUpper = wsD.isDoorUpperHalf(x, y, z);
+                        byte facing = wsD.getDoorFacing(x, y, z);
+                        // Treat as closed; thin panel
+                        float thickness = 0.125f;
+                        float dMinX = 0,
+                            dMaxX = 1,
+                            dMinZ = 0,
+                            dMaxZ = 1;
+                        if (facing == 0 || facing == 2) {
+                            // NORTH/SOUTH -> thickness along Z
+                            dMinZ = 0.5f - thickness * 0.5f;
+                            dMaxZ = 0.5f + thickness * 0.5f;
+                        } else {
+                            // EAST/WEST -> thickness along X
+                            dMinX = 0.5f - thickness * 0.5f;
+                            dMaxX = 0.5f + thickness * 0.5f;
+                        }
+                        GrowableFloatArray vtx = (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.CUTOUT)
+                            ? vtxCutout
+                            : vtxSolid;
+                        GrowableIntArray idx = (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.CUTOUT)
+                            ? idxCutout
+                            : idxSolid;
+
+                        ServerTextureAtlas atlas =
+                            ServerTextureAtlas.getInstance();
+                        ServerTextureAtlas.Region rTop =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "top"
+                            );
+                        ServerTextureAtlas.Region rBottom =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "bottom"
+                            );
+                        ServerTextureAtlas.Region rNorth =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "north"
+                            );
+                        ServerTextureAtlas.Region rSouth =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "south"
+                            );
+                        ServerTextureAtlas.Region rWest =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "west"
+                            );
+                        ServerTextureAtlas.Region rEast =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "east"
+                            );
+
+                        emitCuboid(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            dMinX,
+                            0.0f,
+                            dMinZ,
+                            dMaxX,
+                            1.0f,
+                            dMaxZ,
+                            rTop,
+                            rBottom,
+                            rNorth,
+                            rSouth,
+                            rWest,
+                            rEast,
+                            acc,
+                            baseColor
+                        );
+                        continue;
+                    }
+
+                    // Step B geometry: trapdoors (closed)
+                    if (
+                        acc instanceof WorldSnapshotAccessor wsT &&
+                        __blockId != null &&
+                        __blockId.endsWith("_trapdoor")
+                    ) {
+                        boolean topHalf = wsT.isTrapdoorTopHalf(x, y, z);
+                        float thickness = 0.125f;
+                        float y0t = topHalf ? (1.0f - thickness) : 0.0f;
+                        float y1t = topHalf ? 1.0f : thickness;
+
+                        GrowableFloatArray vtx = vtxCutout;
+                        GrowableIntArray idx = idxCutout;
+
+                        ServerTextureAtlas atlas =
+                            ServerTextureAtlas.getInstance();
+                        ServerTextureAtlas.Region rTop =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "top"
+                            );
+                        ServerTextureAtlas.Region rBottom =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "bottom"
+                            );
+                        ServerTextureAtlas.Region rSide =
+                            atlas.getRegionForBlockFaceByBlockId(
+                                __blockId,
+                                "side"
+                            );
+
+                        emitCuboid(
+                            vtx,
+                            idx,
+                            x,
+                            y,
+                            z,
+                            0.0f,
+                            y0t,
+                            0.0f,
+                            1.0f,
+                            y1t,
+                            1.0f,
+                            rTop,
+                            rBottom,
+                            rSide,
+                            rSide,
+                            rSide,
+                            rSide,
+                            acc,
+                            baseColor
+                        );
+                        continue;
+                    }
+
+                    // Basic non-cube geometry stubs (rails)
+                    // Emit a flat quad slightly above the block to represent straight rails (N/S or E/W)
+                    if (acc instanceof WorldSnapshotAccessor wsRail) {
+                        byte railShape = wsRail.getRailShape(x, y, z); // 0=other,1=NORTH_SOUTH,2=EAST_WEST
+                        if (railShape != 0) {
+                            // Use CUTOUT layer for rails
+                            GrowableFloatArray vtx = vtxCutout;
+                            GrowableIntArray idx = idxCutout;
+
+                            // Sample top-face texture via blockId
+                            ServerTextureAtlas.Region uvR =
+                                ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                    __blockId,
+                                    "top"
+                                );
+
+                            // Normal straight up; use flat lighting (no directional shading)
+                            set3(nrm, 0, 1, 0);
+                            float[] colRail = applyFlatLighting(
+                                acc,
+                                x,
+                                y,
+                                z,
+                                nrm,
+                                baseColor,
+                                faceColor
+                            );
+
+                            // Slightly above Y to avoid z-fighting with neighbors
+                            float yy = y + 0.0625f;
+
+                            // Emit a single horizontal quad over the full cell (stub)
+                            final int baseIndex = vtx.countVertices();
+                            // v0
+                            vtx.add(x + 0.0f);
+                            vtx.add(yy);
+                            vtx.add(z + 0.0f);
+                            vtx.add(nrm[0]);
+                            vtx.add(nrm[1]);
+                            vtx.add(nrm[2]);
+                            vtx.add(colRail[0]);
+                            vtx.add(colRail[1]);
+                            vtx.add(colRail[2]);
+                            vtx.add(colRail[3]);
+                            vtx.add(uvR.u0);
+                            vtx.add(uvR.v1);
+                            // v1
+                            vtx.add(x + 1.0f);
+                            vtx.add(yy);
+                            vtx.add(z + 0.0f);
+                            vtx.add(nrm[0]);
+                            vtx.add(nrm[1]);
+                            vtx.add(nrm[2]);
+                            vtx.add(colRail[0]);
+                            vtx.add(colRail[1]);
+                            vtx.add(colRail[2]);
+                            vtx.add(colRail[3]);
+                            vtx.add(uvR.u1);
+                            vtx.add(uvR.v1);
+                            // v2
+                            vtx.add(x + 1.0f);
+                            vtx.add(yy);
+                            vtx.add(z + 1.0f);
+                            vtx.add(nrm[0]);
+                            vtx.add(nrm[1]);
+                            vtx.add(nrm[2]);
+                            vtx.add(colRail[0]);
+                            vtx.add(colRail[1]);
+                            vtx.add(colRail[2]);
+                            vtx.add(colRail[3]);
+                            vtx.add(uvR.u1);
+                            vtx.add(uvR.v0);
+                            // v3
+                            vtx.add(x + 0.0f);
+                            vtx.add(yy);
+                            vtx.add(z + 1.0f);
+                            vtx.add(nrm[0]);
+                            vtx.add(nrm[1]);
+                            vtx.add(nrm[2]);
+                            vtx.add(colRail[0]);
+                            vtx.add(colRail[1]);
+                            vtx.add(colRail[2]);
+                            vtx.add(colRail[3]);
+                            vtx.add(uvR.u0);
+                            vtx.add(uvR.v0);
+
+                            // indices
+                            idx.add(baseIndex + 0);
+                            idx.add(baseIndex + 1);
+                            idx.add(baseIndex + 2);
+                            idx.add(baseIndex + 0);
+                            idx.add(baseIndex + 2);
+                            idx.add(baseIndex + 3);
+
+                            // Done with rail stub for this block
+                            continue;
+                        } else {
+                            if (
+                                __blockId != null && __blockId.contains("rail")
+                            ) {
+                                String k = "vulkanmod.loggedRailAscending";
+                                if (!"1".equals(System.getProperty(k))) {
+                                    System.out.println(
+                                        "[MeshBuilder] Rails with non-straight/ascending/switch shape detected; falling back to flat rail quad or cube for now."
+                                    );
+                                    System.setProperty(k, "1");
+                                }
+                            }
+                        }
+                    }
+
                     // Resolve UV region from the server-side texture atlas for this block key
                     ServerTextureAtlas.Region __uv =
                         ServerTextureAtlas.getInstance().getRegionForBlockKey(
@@ -1101,7 +2289,12 @@ public final class MeshBuilder {
                         u1 = __uv.u1,
                         v1 = __uv.v1;
 
-                    boolean cutout = isCutoutKey(key);
+                    boolean cutout =
+                        (__rtype ==
+                            net.vulkanmod.server.pack.RenderType.CUTOUT) ||
+                        (__rtype ==
+                                net.vulkanmod.server.pack.RenderType.SOLID &&
+                            isCutoutKey(key));
                     GrowableFloatArray vtx = translucent
                         ? vtxTranslucent
                         : (cutout ? vtxCutout : vtxSolid);
@@ -1118,8 +2311,8 @@ public final class MeshBuilder {
                         set3(nrm, 0, 0, -1);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "side"
                             );
                         float su0 = __uv_side.u0,
@@ -1132,7 +2325,10 @@ public final class MeshBuilder {
                             x,
                             y,
                             z,
-                            FACE_NZ,
+                            (__rtype ==
+                                    net.vulkanmod.server.pack.RenderType.WATER
+                                    ? FACE_NZ_WATER
+                                    : FACE_NZ),
                             nrm,
                             applyLighting(
                                 acc,
@@ -1158,8 +2354,8 @@ public final class MeshBuilder {
                         set3(nrm, 0, 0, 1);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "side"
                             );
                         float su0 = __uv_side.u0,
@@ -1172,7 +2368,10 @@ public final class MeshBuilder {
                             x,
                             y,
                             z,
-                            FACE_PZ,
+                            (__rtype ==
+                                    net.vulkanmod.server.pack.RenderType.WATER
+                                    ? FACE_PZ_WATER
+                                    : FACE_PZ),
                             nrm,
                             applyLighting(
                                 acc,
@@ -1198,8 +2397,8 @@ public final class MeshBuilder {
                         set3(nrm, -1, 0, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "side"
                             );
                         float su0 = __uv_side.u0,
@@ -1212,7 +2411,10 @@ public final class MeshBuilder {
                             x,
                             y,
                             z,
-                            FACE_NX,
+                            (__rtype ==
+                                    net.vulkanmod.server.pack.RenderType.WATER
+                                    ? FACE_NX_WATER
+                                    : FACE_NX),
                             nrm,
                             applyLighting(
                                 acc,
@@ -1238,8 +2440,8 @@ public final class MeshBuilder {
                         set3(nrm, 1, 0, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_side =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "side"
                             );
                         float su0 = __uv_side.u0,
@@ -1252,7 +2454,10 @@ public final class MeshBuilder {
                             x,
                             y,
                             z,
-                            FACE_PX,
+                            (__rtype ==
+                                    net.vulkanmod.server.pack.RenderType.WATER
+                                    ? FACE_PX_WATER
+                                    : FACE_PX),
                             nrm,
                             applyLighting(
                                 acc,
@@ -1278,8 +2483,8 @@ public final class MeshBuilder {
                         set3(nrm, 0, 1, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_t =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "top"
                             );
                         float tu0 = __uv_t.u0,
@@ -1292,7 +2497,10 @@ public final class MeshBuilder {
                             x,
                             y,
                             z,
-                            FACE_PY,
+                            (__rtype ==
+                                    net.vulkanmod.server.pack.RenderType.WATER
+                                    ? FACE_PY_WATER
+                                    : FACE_PY),
                             nrm,
                             applyLighting(
                                 acc,
@@ -1318,8 +2526,8 @@ public final class MeshBuilder {
                         set3(nrm, 0, -1, 0);
                         // Always use per-face atlas region; falls back internally if not defined
                         ServerTextureAtlas.Region __uv_b =
-                            ServerTextureAtlas.getInstance().getRegionForBlockFace(
-                                key,
+                            ServerTextureAtlas.getInstance().getRegionForBlockFaceByBlockId(
+                                __blockId,
                                 "bottom"
                             );
                         float bu0 = __uv_b.u0,
@@ -1365,6 +2573,28 @@ public final class MeshBuilder {
         int[] idxTranslucentArr = Arrays.copyOf(
             idxTranslucent.data,
             idxTranslucent.size
+        );
+        // Instrumentation: print sizes prior to RegionMesh.fromArrays to help diagnose overflows
+        System.out.println(
+            "[MeshBuilder] buildRegionLayered: sizes floats={solid=" +
+            vtxSolid.size +
+            ", cutout=" +
+            vtxCutout.size +
+            ", translucent=" +
+            vtxTranslucent.size +
+            "} indices={solid=" +
+            idxSolid.size +
+            ", cutout=" +
+            idxCutout.size +
+            ", translucent=" +
+            idxTranslucent.size +
+            "} regionChunks=" +
+            cfg.regionSizeChunks +
+            " y=[" +
+            minY +
+            "," +
+            maxY +
+            ")"
         );
 
         RegionMesh solidMesh = RegionMesh.fromArrays(

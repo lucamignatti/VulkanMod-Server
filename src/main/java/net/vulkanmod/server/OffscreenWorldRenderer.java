@@ -1755,15 +1755,188 @@ public final class OffscreenWorldRenderer {
                         solidMesh = layered.solid;
                         cutoutMesh = layered.cutout;
                         translucentMesh = layered.translucent;
+                        System.out.println(
+                            "OffscreenWorldRenderer: CPU mesh counts - solid=" +
+                            (solidMesh != null
+                                    ? solidMesh.getIndexCount()
+                                    : 0) +
+                            " cutout=" +
+                            (cutoutMesh != null
+                                    ? cutoutMesh.getIndexCount()
+                                    : 0) +
+                            " translucent=" +
+                            (translucentMesh != null
+                                    ? translucentMesh.getIndexCount()
+                                    : 0)
+                        );
                     }
                 } catch (Throwable t) {
                     System.err.println(
                         "OffscreenWorldRenderer: server-thread layered snapshot/mesh failed: " +
                         t
                     );
-                    solidMesh = null;
-                    cutoutMesh = null;
-                    translucentMesh = null;
+                    // Iterative fallback: on overflow, keep halving the region until success (down to 2x2 chunks)
+                    boolean __overflow =
+                        (t instanceof java.util.concurrent.ExecutionException &&
+                            t.getCause() instanceof
+                            java.nio.BufferOverflowException) ||
+                        (t.getCause() instanceof
+                            java.nio.BufferOverflowException) ||
+                        String.valueOf(t).contains("BufferOverflowException");
+
+                    if (__overflow) {
+                        int attemptChunks = Math.max(2, regionSizeChunks / 2);
+                        while (attemptChunks >= 2) {
+                            try {
+                                final int csLocal = cs;
+                                final int fbChunks = attemptChunks;
+                                final int regionChunkX2 =
+                                    (int) Math.floor(x / csLocal) -
+                                    (fbChunks / 2);
+                                final int regionChunkZ2 =
+                                    (int) Math.floor(z / csLocal) -
+                                    (fbChunks / 2);
+                                final int minX2 = regionChunkX2 * csLocal;
+                                final int minZ2 = regionChunkZ2 * csLocal;
+                                final int sideBlocks2 = fbChunks * csLocal;
+
+                                java.util.concurrent.CompletableFuture<
+                                    MeshBuilder.LayeredRegionMesh
+                                > retryFuture =
+                                    new java.util.concurrent.CompletableFuture<>();
+
+                                msLocal.execute(() -> {
+                                    try {
+                                        // Ensure chunks are loaded for fallback region
+                                        for (
+                                            int cz = regionChunkZ2;
+                                            cz < regionChunkZ2 + fbChunks;
+                                            cz++
+                                        ) {
+                                            for (
+                                                int cx2 = regionChunkX2;
+                                                cx2 < regionChunkX2 + fbChunks;
+                                                cx2++
+                                            ) {
+                                                try {
+                                                    worldFinal.getChunk(
+                                                        cx2,
+                                                        cz
+                                                    );
+                                                } catch (Throwable ignore) {}
+                                            }
+                                        }
+
+                                        WorldSnapshotAccessor snap2 =
+                                            WorldSnapshotAccessor.capture(
+                                                worldFinal,
+                                                minX2,
+                                                minY,
+                                                minZ2,
+                                                minX2 + sideBlocks2,
+                                                maxY,
+                                                minZ2 + sideBlocks2
+                                            );
+
+                                        MeshBuilder.Config cfg2 =
+                                            new MeshBuilder.Config();
+                                        cfg2.regionSizeChunks = fbChunks;
+                                        cfg2.minY = minY;
+                                        cfg2.maxY = maxY;
+
+                                        MeshBuilder builder2 = new MeshBuilder(
+                                            cfg2
+                                        );
+                                        long version2 =
+                                            System.currentTimeMillis();
+
+                                        retryFuture.complete(
+                                            builder2.buildRegionLayered(
+                                                snap2,
+                                                regionChunkX2,
+                                                regionChunkZ2,
+                                                version2
+                                            )
+                                        );
+                                    } catch (Throwable t2) {
+                                        retryFuture.completeExceptionally(t2);
+                                    }
+                                });
+
+                                MeshBuilder.LayeredRegionMesh layered2 =
+                                    retryFuture.get();
+                                if (layered2 != null) {
+                                    solidMesh = layered2.solid;
+                                    cutoutMesh = layered2.cutout;
+                                    translucentMesh = layered2.translucent;
+                                    System.out.println(
+                                        "OffscreenWorldRenderer: CPU mesh counts (" +
+                                        fbChunks +
+                                        " chunks) - solid=" +
+                                        (solidMesh != null
+                                                ? solidMesh.getIndexCount()
+                                                : 0) +
+                                        " cutout=" +
+                                        (cutoutMesh != null
+                                                ? cutoutMesh.getIndexCount()
+                                                : 0) +
+                                        " translucent=" +
+                                        (translucentMesh != null
+                                                ? translucentMesh.getIndexCount()
+                                                : 0)
+                                    );
+                                    break;
+                                } else {
+                                    // No mesh produced; reduce attempt size
+                                    System.err.println(
+                                        "OffscreenWorldRenderer: mesh build produced no geometry at " +
+                                        fbChunks +
+                                        " chunks; reducing"
+                                    );
+                                }
+                            } catch (Throwable t3) {
+                                boolean __overflow2 =
+                                    (t3 instanceof
+                                            java.util.concurrent.ExecutionException &&
+                                        t3.getCause() instanceof
+                                        java.nio.BufferOverflowException) ||
+                                    (t3.getCause() instanceof
+                                        java.nio.BufferOverflowException) ||
+                                    String.valueOf(t3).contains(
+                                        "BufferOverflowException"
+                                    );
+                                if (!__overflow2) {
+                                    System.err.println(
+                                        "OffscreenWorldRenderer: fallback mesh build failed (non-overflow): " +
+                                        t3
+                                    );
+                                    break;
+                                }
+                                System.err.println(
+                                    "OffscreenWorldRenderer: mesh overflow at " +
+                                    attemptChunks +
+                                    " chunks; reducing"
+                                );
+                            }
+                            attemptChunks = (attemptChunks > 2
+                                    ? Math.max(2, attemptChunks / 2)
+                                    : 1);
+                        }
+                        if (
+                            solidMesh == null &&
+                            cutoutMesh == null &&
+                            translucentMesh == null
+                        ) {
+                            // Ensure nulls if all attempts failed
+                            solidMesh = null;
+                            cutoutMesh = null;
+                            translucentMesh = null;
+                        }
+                    } else {
+                        solidMesh = null;
+                        cutoutMesh = null;
+                        translucentMesh = null;
+                    }
                 }
             }
         } catch (Throwable t) {
@@ -2160,6 +2333,16 @@ public final class OffscreenWorldRenderer {
                 pc.flip();
 
                 // Bind atlas descriptor set
+                System.out.println(
+                    "OffscreenWorldRenderer: descriptorSet=" +
+                    descriptorSet +
+                    " atlasImage=" +
+                    atlasImage +
+                    " atlasImageView=" +
+                    atlasImageView +
+                    " atlasSampler=" +
+                    atlasSampler
+                );
                 vkCmdBindDescriptorSets(
                     commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS,
